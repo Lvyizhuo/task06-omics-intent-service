@@ -121,6 +121,21 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
 
     except Exception as e:
         logger.error(f"下游接口调用失败 | task_id={task_id} error={str(e)}")
+
+        # 提取错误详情
+        error_detail = str(e)
+        error_message = "下游接口调用失败"
+
+        # 如果是 HTTP 400 错误，提取具体原因
+        if hasattr(e, 'response') and e.response.status_code == 400:
+            try:
+                error_body = e.response.json()
+                if 'detail' in error_body:
+                    error_detail = error_body['detail']
+                    error_message = "参数验证失败"
+            except Exception:
+                pass
+
         # 调用失败，降级为推荐任务
         return IntentResponse(
             confidence="medium",
@@ -133,8 +148,8 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                     guide_message=TASK_DETAILS.get(task_id, {}).get("guide_message", "请提供DNA序列"),
                 )
             ],
-            guide_message=f"已识别到您需要进行{task_name}，但接口调用暂时失败。请稍后重试或手动调用接口。",
-            error=ErrorInfo(code=1003, message="下游接口调用失败", detail=str(e)),
+            guide_message=f"已识别到您需要进行{task_name}，但参数有误：{error_detail}",
+            error=ErrorInfo(code=1003, message=error_message, detail=error_detail),
         )
 
 
