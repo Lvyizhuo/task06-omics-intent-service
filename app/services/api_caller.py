@@ -54,12 +54,12 @@ def build_request_body(task_id: int, params: Dict[str, Any], task_param: Optiona
     # EVO2 基因序列预测生成
     if task_id == 101:
         request_body["prompt"] = params.get("prompt") or params.get("sequence", "")
-        # EVO2 默认参数（客户要求）
+        # EVO2 默认参数（客户要求）- 所有参数必须是 string 类型
         request_body["numTokens"] = str(params.get("numTokens", "200"))
-        request_body["temperature"] = params.get("temperature", 0.6)
-        request_body["topK"] = params.get("topK", 4)
-        request_body["topP"] = params.get("topP", 0.6)
-        request_body["showLogits"] = params.get("showLogits", False)
+        request_body["temperature"] = str(params.get("temperature", "0.6"))
+        request_body["topK"] = str(params.get("topK", "4"))
+        request_body["topP"] = str(params.get("topP", "0.6"))
+        request_body["showLogits"] = str(params.get("showLogits", "false")).lower()
 
     # 嵌入提取
     elif task_id == 201:
