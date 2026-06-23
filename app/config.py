@@ -1,5 +1,18 @@
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+# 优先加载项目根目录的 .env 文件
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+else:
+    # 如果没有 .env 文件，尝试从环境变量加载
+    load_dotenv()
+
 
 @dataclass
 class Settings:
