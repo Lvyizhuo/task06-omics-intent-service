@@ -7,8 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: omics-intent-service
     restart: unless-stopped
-    ports:
-      - "8010:8010"
+    network_mode: host  # 使用宿主机网络，可直接访问 localhost:8005
     env_file:
       - .env
     environment:
@@ -24,9 +23,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    networks:
-      - omics-network
-
-networks:
-  omics-network:
-    driver: bridge
