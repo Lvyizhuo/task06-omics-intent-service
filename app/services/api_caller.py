@@ -55,12 +55,12 @@ def build_request_body(task_id: int, params: Dict[str, Any], task_param: Optiona
     if task_id == 101:
         request_body["prompt"] = params.get("prompt") or params.get("sequence", "")
         # EVO2 默认参数（客户要求）
-        # 注意：根据实际接口测试，字段名是 camelCase，temperature 必须是 string
-        request_body["numTokens"] = int(params.get("numTokens", 200))
+        # 注意：根据实际接口测试，所有参数必须是 string 类型
+        request_body["numTokens"] = str(params.get("numTokens", "200"))
         request_body["temperature"] = str(params.get("temperature", "0.6"))
-        request_body["topK"] = int(params.get("topK", 4))
-        request_body["topP"] = float(params.get("topP", 0.6))
-        request_body["showLogits"] = int(params.get("showLogits", 0))
+        request_body["topK"] = str(params.get("topK", "4"))
+        request_body["topP"] = str(params.get("topP", "0.6"))
+        request_body["showLogits"] = str(params.get("showLogits", "0"))
 
     # 嵌入提取
     elif task_id == 201:
