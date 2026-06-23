@@ -109,6 +109,11 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         result = await call_downstream_api(task_id, params)
         guide_message = format_result_for_user(task_id, result)
 
+        # EVO2 任务提示信息
+        evo2_tip = ""
+        if task_id == 101:
+            evo2_tip = " 当前结果基于默认参数计算（numTokens=200, temperature=0.6, topK=4, topP=0.6, showLogits=0），如需自定义参数，请手动选择EVO2任务并指定参数。"
+
         return IntentResponse(
             confidence="high",
             task_id=task_id,
@@ -116,7 +121,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
             model=model,
             params=params,
             result=result,
-            guide_message=f"已为您完成{task_name}。{guide_message}",
+            guide_message=f"已为您完成{task_name}。{guide_message}{evo2_tip}",
         )
 
     except Exception as e:
