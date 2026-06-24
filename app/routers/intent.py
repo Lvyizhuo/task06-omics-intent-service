@@ -6,6 +6,7 @@
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
+from typing import Dict, Any
 
 from app.schemas.requests import IntentRequest, IntentResponse, SuggestedTask, AvailableTask, ErrorInfo
 from app.services.intent_recognizer import recognize_intent
@@ -14,6 +15,62 @@ from app.services.api_caller import call_downstream_api, format_result_for_user,
 from app.prompts.task_prompts import TASK_NAME_MAP, TASK_MODEL_MAP, TASK_DETAILS
 
 router = APIRouter(prefix="/intent", tags=["意图识别"])
+
+
+def generate_dynamic_guide(task_id: int, extracted_params: Dict[str, Any]) -> str:
+    """
+    根据任务需要的参数和用户已提供的参数，动态生成引导提示
+
+    Args:
+        task_id: 任务ID
+        extracted_params: 已提取的参数
+
+    Returns:
+        动态生成的引导提示
+    """
+    task_detail = TASK_DETAILS.get(task_id, {})
+    required_fields = task_detail.get("data_fields", [])
+    task_name = task_detail.get("name", "未知任务")
+
+    if not required_fields:
+        return task_detail.get("guide_message", "请提供必要的参数")
+
+    # 参数中文名映射
+    param_names = {
+        "prompt": "DNA序列",
+        "sequence": "DNA序列",
+        "numTokens": "生成长度(numTokens)",
+        "temperature": "温度(temperature)",
+        "topK": "topK参数",
+        "topP": "topP参数",
+        "showLogits": "显示logits(showLogits)",
+        "normalize": "是否归一化(normalize)",
+        "position": "变异位置(position)",
+        "ref_allele": "参考碱基(ref_allele)",
+        "alt_alleles": "变异碱基(alt_alleles)",
+        "positions": "预测位置列表(positions)",
+    }
+
+    # 检查哪些参数已提供，哪些缺少
+    provided = []
+    missing = []
+
+    for field in required_fields:
+        if field in extracted_params and extracted_params[field] is not None:
+            provided.append(param_names.get(field, field))
+        else:
+            # 可选参数不算缺少
+            if field not in ["numTokens", "temperature", "topK", "topP", "showLogits", "normalize"]:
+                missing.append(param_names.get(field, field))
+
+    # 生成提示
+    if not missing:
+        return f"已识别到您需要进行{task_name}，参数完整。"
+
+    if provided:
+        return f"已识别到您需要进行{task_name}，已提取：{'、'.join(provided)}。请补充：{'、'.join(missing)}"
+    else:
+        return f"已识别到您需要进行{task_name}，请提供：{'、'.join(missing)}"
 
 
 @router.post("/recognize", response_model=IntentResponse)
@@ -39,9 +96,9 @@ async def recognize_user_intent(request: IntentRequest):
         if confidence == "high":
             return await handle_high_confidence(intent_result)
         elif confidence == "medium":
-            return handle_medium_confidence(intent_result)
+            return await handle_medium_confidence(intent_result, request.user_input)
         else:
-            return handle_low_confidence(intent_result)
+            return await handle_low_confidence(intent_result, request.user_input)
 
     except Exception as e:
         logger.error(f"意图识别处理异常: {str(e)}", exc_info=True)
@@ -89,6 +146,8 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
     # 检查参数是否完整
     if not params or not (params.get("sequence") or params.get("prompt")):
         logger.info("参数不完整，降级为中置信度推荐")
+        # 生成动态提示
+        dynamic_guide = generate_dynamic_guide(task_id, params or {})
         # 降级为中置信度
         return IntentResponse(
             confidence="medium",
@@ -98,10 +157,11 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                     task_name=task_name,
                     model=model,
                     description=TASK_DETAILS.get(task_id, {}).get("description", ""),
-                    guide_message=TASK_DETAILS.get(task_id, {}).get("guide_message", "请提供DNA序列"),
+                    guide_message=dynamic_guide,
                 )
             ],
-            guide_message=f"已识别到您需要进行{task_name}，但缺少必要的数据。{TASK_DETAILS.get(task_id, {}).get('guide_message', '请提供DNA序列')}",
+            guide_message=f"已识别到您需要进行{task_name}，但缺少必要的数据。{dynamic_guide}",
+            params=params if params else None,
         )
 
     # 调用下游接口
@@ -158,12 +218,13 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         )
 
 
-def handle_medium_confidence(intent_result: dict) -> IntentResponse:
+async def handle_medium_confidence(intent_result: dict, user_input: str) -> IntentResponse:
     """
     处理中置信度场景
 
     Args:
         intent_result: 意图识别结果
+        user_input: 用户原始输入
 
     Returns:
         包含推荐任务的响应
@@ -173,37 +234,74 @@ def handle_medium_confidence(intent_result: dict) -> IntentResponse:
 
     # 转换为SuggestedTask模型
     suggested_tasks = []
+    extracted_params = {}
+
     for task in suggested_tasks_raw:
         if isinstance(task, dict):
+            task_id = task.get("task_id", 0)
+            task_name = task.get("task_name", "")
+            model = task.get("model", "")
+
+            # 提取用户已输入的参数
+            try:
+                params = await extract_params(user_input, task_id)
+                if params:
+                    extracted_params[task_id] = params
+                    logger.info(f"中置信度提取参数 | task_id={task_id} params={list(params.keys())}")
+
+                    # 生成动态提示
+                    dynamic_guide = generate_dynamic_guide(task_id, params)
+                    task["guide_message"] = dynamic_guide
+            except Exception as e:
+                logger.warning(f"中置信度参数提取失败 | task_id={task_id} error={str(e)}")
+
             suggested_tasks.append(SuggestedTask(
-                task_id=task.get("task_id", 0),
-                task_name=task.get("task_name", ""),
-                model=task.get("model", ""),
+                task_id=task_id,
+                task_name=task_name,
+                model=model,
                 description=task.get("description", ""),
                 guide_message=task.get("guide_message", ""),
             ))
 
     logger.info(f"中置信度场景 | 推荐任务数={len(suggested_tasks)}")
 
+    # 如果只有一个推荐任务且提取到了参数，直接返回该任务的参数
+    params_to_return = None
+    if len(suggested_tasks) == 1 and suggested_tasks[0].task_id in extracted_params:
+        params_to_return = extracted_params[suggested_tasks[0].task_id]
+
     return IntentResponse(
         confidence="medium",
         suggested_tasks=suggested_tasks,
         guide_message=guide_message,
+        params=params_to_return,
     )
 
 
-def handle_low_confidence(intent_result: dict) -> IntentResponse:
+async def handle_low_confidence(intent_result: dict, user_input: str) -> IntentResponse:
     """
     处理低置信度场景
 
     Args:
         intent_result: 意图识别结果
+        user_input: 用户原始输入
 
     Returns:
         包含所有可用任务的响应
     """
     guide_message = intent_result.get("guide_message", "")
     available_tasks_raw = intent_result.get("available_tasks", [])
+
+    # 尝试从用户输入中提取通用数据（如DNA序列）
+    extracted_params = {}
+    try:
+        from app.services.param_extractor import extract_params_by_regex
+        generic_params = extract_params_by_regex(user_input, 0)  # task_id=0 表示通用提取
+        if generic_params:
+            extracted_params = generic_params
+            logger.info(f"低置信度提取通用参数 | params={list(generic_params.keys())}")
+    except Exception as e:
+        logger.warning(f"低置信度参数提取失败 | error={str(e)}")
 
     # 转换为AvailableTask模型
     available_tasks = []
@@ -217,8 +315,14 @@ def handle_low_confidence(intent_result: dict) -> IntentResponse:
 
     logger.info(f"低置信度场景 | 可用任务数={len(available_tasks)}")
 
+    # 如果提取到了序列，在引导消息中提示
+    if extracted_params.get("sequence") or extracted_params.get("prompt"):
+        sequence = extracted_params.get("sequence") or extracted_params.get("prompt", "")
+        guide_message += f"\n\n已从您的输入中识别到DNA序列（长度{len(sequence)}bp），选择任务后可直接使用。"
+
     return IntentResponse(
         confidence="low",
         guide_message=guide_message,
         available_tasks=available_tasks,
+        params=extracted_params if extracted_params else None,
     )
