@@ -209,8 +209,8 @@ def extract_params_by_regex(user_input: str, task_id: int) -> Dict[str, Any]:
     logger.info(f"使用正则表达式提取参数 | task_id={task_id}")
     params = {}
 
-    # 提取DNA序列
-    dna_pattern = r'[ACGTNRYSWKMBDHVacgtnryswkmbdhv]{10,}'
+    # 提取DNA序列（最少4个碱基）
+    dna_pattern = r'[ACGTNRYSWKMBDHVacgtnryswkmbdhv]{4,}'
     dna_match = re.search(dna_pattern, user_input)
     if dna_match:
         sequence = dna_match.group().upper()
