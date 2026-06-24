@@ -273,32 +273,31 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
     suggested_tasks_raw = intent_result.get("suggested_tasks", [])
     guide_message = intent_result.get("guide_message", "您想进行哪种分析？")
 
+    # 只提取一次参数（使用第一个推荐任务的ID）
+    extracted_params = {}
+    if suggested_tasks_raw:
+        first_task = suggested_tasks_raw[0]
+        if isinstance(first_task, dict):
+            first_task_id = first_task.get("task_id", 201)  # 默认使用201
+            try:
+                extracted_params = await extract_params(user_input, first_task_id)
+                if extracted_params:
+                    logger.info(f"中置信度提取参数 | task_id={first_task_id} params={list(extracted_params.keys())}")
+            except Exception as e:
+                logger.warning(f"中置信度参数提取失败 | task_id={first_task_id} error={str(e)}")
+
     # 转换为SuggestedTask模型
     suggested_tasks = []
-    all_extracted_params = {}  # 合并所有任务提取的参数
-
     for task in suggested_tasks_raw:
         if isinstance(task, dict):
             task_id = task.get("task_id", 0)
             task_name = task.get("task_name", "")
             model = task.get("model", "")
 
-            # 提取用户已输入的参数
-            try:
-                params = await extract_params(user_input, task_id)
-                if params:
-                    logger.info(f"中置信度提取参数 | task_id={task_id} params={list(params.keys())}")
-
-                    # 合并到总参数中
-                    for key, value in params.items():
-                        if key not in all_extracted_params:
-                            all_extracted_params[key] = value
-
-                    # 生成动态提示
-                    dynamic_guide = generate_dynamic_guide(task_id, params)
-                    task["guide_message"] = dynamic_guide
-            except Exception as e:
-                logger.warning(f"中置信度参数提取失败 | task_id={task_id} error={str(e)}")
+            # 用已提取的参数生成动态提示
+            if extracted_params:
+                dynamic_guide = generate_dynamic_guide(task_id, extracted_params)
+                task["guide_message"] = dynamic_guide
 
             suggested_tasks.append(SuggestedTask(
                 task_id=task_id,
@@ -311,7 +310,7 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
     logger.info(f"中置信度场景 | 推荐任务数={len(suggested_tasks)}")
 
     # 填充完整的字段结构
-    full_params = fill_all_params(all_extracted_params)
+    full_params = fill_all_params(extracted_params)
 
     return IntentResponse(
         confidence="medium",
