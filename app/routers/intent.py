@@ -16,6 +16,38 @@ from app.prompts.task_prompts import TASK_NAME_MAP, TASK_MODEL_MAP, TASK_DETAILS
 
 router = APIRouter(prefix="/intent", tags=["意图识别"])
 
+# 所有可能的参数字段（完整列表）
+ALL_PARAM_FIELDS = [
+    "sequence",      # DNA序列（PlantCAD2）
+    "prompt",        # DNA序列（EVO2）
+    "position",      # 变异位置
+    "ref_allele",    # 参考碱基
+    "alt_alleles",   # 变异碱基列表
+    "positions",     # 预测位置列表
+    "numTokens",     # 生成长度（EVO2）
+    "temperature",   # 温度（EVO2）
+    "topK",          # topK参数（EVO2）
+    "topP",          # topP参数（EVO2）
+    "showLogits",    # 显示logits（EVO2）
+    "normalize",     # 是否归一化
+]
+
+
+def fill_all_params(extracted_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    用所有可能的字段填充params，未提取到的字段设为None
+
+    Args:
+        extracted_params: 已提取的参数
+
+    Returns:
+        包含所有字段的参数字典
+    """
+    full_params = {}
+    for field in ALL_PARAM_FIELDS:
+        full_params[field] = extracted_params.get(field, None)
+    return full_params
+
 
 def generate_dynamic_guide(task_id: int, extracted_params: Dict[str, Any]) -> str:
     """
@@ -148,6 +180,8 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         logger.info("参数不完整，降级为中置信度推荐")
         # 生成动态提示
         dynamic_guide = generate_dynamic_guide(task_id, params or {})
+        # 填充完整的字段结构
+        full_params = fill_all_params(params or {})
         # 降级为中置信度
         return IntentResponse(
             confidence="medium",
@@ -161,7 +195,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                 )
             ],
             guide_message=f"已识别到您需要进行{task_name}，但缺少必要的数据。{dynamic_guide}",
-            params=params if params else None,
+            params=full_params,
         )
 
     # 调用下游接口
@@ -174,12 +208,15 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         if task_id == 101:
             evo2_tip = " 当前结果基于默认参数计算（numTokens=200, temperature=0.6, topK=4, topP=0.6, showLogits=0），如需自定义参数，请手动选择EVO2任务并指定参数。"
 
+        # 填充完整的字段结构
+        full_params = fill_all_params(params)
+
         return IntentResponse(
             confidence="high",
             task_id=task_id,
             task_name=task_name,
             model=model,
-            params=params,
+            params=full_params,
             result=result,
             guide_message=f"已为您完成{task_name}。{guide_message}{evo2_tip}",
         )
@@ -202,6 +239,9 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                 pass
 
         # 调用失败，降级为推荐任务
+        # 填充完整的字段结构
+        full_params = fill_all_params(params)
+
         return IntentResponse(
             confidence="medium",
             suggested_tasks=[
@@ -214,6 +254,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                 )
             ],
             guide_message=f"已识别到您需要进行{task_name}，但参数有误：{error_detail}",
+            params=full_params,
             error=ErrorInfo(code=1003, message=error_message, detail=error_detail),
         )
 
@@ -234,7 +275,7 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
 
     # 转换为SuggestedTask模型
     suggested_tasks = []
-    extracted_params = {}
+    all_extracted_params = {}  # 合并所有任务提取的参数
 
     for task in suggested_tasks_raw:
         if isinstance(task, dict):
@@ -246,8 +287,12 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
             try:
                 params = await extract_params(user_input, task_id)
                 if params:
-                    extracted_params[task_id] = params
                     logger.info(f"中置信度提取参数 | task_id={task_id} params={list(params.keys())}")
+
+                    # 合并到总参数中
+                    for key, value in params.items():
+                        if key not in all_extracted_params:
+                            all_extracted_params[key] = value
 
                     # 生成动态提示
                     dynamic_guide = generate_dynamic_guide(task_id, params)
@@ -265,26 +310,14 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
 
     logger.info(f"中置信度场景 | 推荐任务数={len(suggested_tasks)}")
 
-    # 提取通用参数（所有任务共有的参数，如sequence）
-    params_to_return = None
-    if extracted_params:
-        # 从所有任务提取的参数中，找出通用参数
-        common_params = {}
-        for task_id, params in extracted_params.items():
-            for key, value in params.items():
-                # 如果这个参数在多个任务中都出现了，或者这是第一个任务的参数
-                if key not in common_params:
-                    common_params[key] = value
-
-        if common_params:
-            params_to_return = common_params
-            logger.info(f"中置信度返回通用参数 | params={list(common_params.keys())}")
+    # 填充完整的字段结构
+    full_params = fill_all_params(all_extracted_params)
 
     return IntentResponse(
         confidence="medium",
         suggested_tasks=suggested_tasks,
         guide_message=guide_message,
-        params=params_to_return,
+        params=full_params,
     )
 
 
@@ -330,9 +363,12 @@ async def handle_low_confidence(intent_result: dict, user_input: str) -> IntentR
         sequence = extracted_params.get("sequence") or extracted_params.get("prompt", "")
         guide_message += f"\n\n已从您的输入中识别到DNA序列（长度{len(sequence)}bp），选择任务后可直接使用。"
 
+    # 填充完整的字段结构
+    full_params = fill_all_params(extracted_params)
+
     return IntentResponse(
         confidence="low",
         guide_message=guide_message,
         available_tasks=available_tasks,
-        params=extracted_params if extracted_params else None,
+        params=full_params,
     )
