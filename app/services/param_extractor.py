@@ -144,7 +144,9 @@ def validate_params(params: Dict[str, Any], task_id: int) -> Dict[str, Any]:
     if task_id == 202:
         if "position" in params:
             try:
-                validated["position"] = int(params["position"])
+                # 用户习惯1-based，转换为0-based
+                user_pos = int(params["position"])
+                validated["position"] = max(0, user_pos - 1)
             except (ValueError, TypeError):
                 pass
         if "ref_allele" in params:
@@ -162,7 +164,8 @@ def validate_params(params: Dict[str, Any], task_id: int) -> Dict[str, Any]:
         if "positions" in params:
             positions = params["positions"]
             if isinstance(positions, list):
-                validated["positions"] = [int(p) for p in positions if isinstance(p, (int, float)) or (isinstance(p, str) and p.isdigit())]
+                # 用户习惯1-based，转换为0-based
+                validated["positions"] = [max(0, int(p) - 1) for p in positions if isinstance(p, (int, float)) or (isinstance(p, str) and p.isdigit())]
 
     # 验证嵌入提取参数 (201)
     if task_id == 201:
@@ -224,7 +227,9 @@ def extract_params_by_regex(user_input: str, task_id: int) -> Dict[str, Any]:
         pos_pattern = r'(?:位置|position|pos)[：:\s]*(\d+)'
         pos_match = re.search(pos_pattern, user_input, re.IGNORECASE)
         if pos_match:
-            params["position"] = int(pos_match.group(1))
+            # 用户习惯1-based，转换为0-based
+            user_pos = int(pos_match.group(1))
+            params["position"] = max(0, user_pos - 1)
 
         # 提取碱基信息
         ref_pattern = r'(?:参考|ref)[：:\s]*([ACGT])'
@@ -245,6 +250,7 @@ def extract_params_by_regex(user_input: str, task_id: int) -> Dict[str, Any]:
         pos_match = re.search(pos_list_pattern, user_input, re.IGNORECASE)
         if pos_match:
             positions = re.findall(r'\d+', pos_match.group(1))
-            params["positions"] = [int(p) for p in positions]
+            # 用户习惯1-based，转换为0-based
+            params["positions"] = [max(0, int(p) - 1) for p in positions]
 
     return params
