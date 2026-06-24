@@ -166,8 +166,8 @@ PARAM_EXTRACTION_PROMPT = """你是一个参数提取助手。根据用户输入
 |--------|---------------|-------------|
 | 101 | prompt, numTokens(可选), temperature(可选), topK(可选), topP(可选) | prompt: DNA序列; numTokens: 正整数(默认1200); temperature: 0-2(默认0.1); topK: 正整数(默认4); topP: 0-1(默认0.5) |
 | 201 | sequence, normalize(可选) | sequence: IUPAC碱基字符串(A/C/G/T/N/R/Y/M/K/S/W/H/V/D); normalize: true/false(默认true) |
-| 202 | sequence, position, ref_allele, alt_alleles | sequence: IUPAC碱基字符串; position: 用户说的位置（1-based，如第3个位置就填3）; ref_allele: A/C/G/T; alt_alleles: [A/C/G/T]数组 |
-| 203 | sequence, positions | sequence: IUPAC碱基字符串; positions: 用户说的位置列表（1-based，如[1,3,5]） |
+| 202 | sequence, position, ref_allele, alt_alleles | sequence: IUPAC碱基字符串; position: 用户说的位置（直接填用户说的数字）; ref_allele: A/C/G/T; alt_alleles: [A/C/G/T]数组 |
+| 203 | sequence, positions | sequence: IUPAC碱基字符串; positions: 用户说的位置列表（直接填用户说的数字，如[1,3,5]） |
 | 204-210 | sequence | sequence: IUPAC碱基字符串 |
 
 ### 输出格式

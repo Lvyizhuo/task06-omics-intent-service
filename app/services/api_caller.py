@@ -71,14 +71,20 @@ def build_request_body(task_id: int, params: Dict[str, Any], task_param: Optiona
     # 变异打分
     elif task_id == 202:
         request_body["sequence"] = params.get("sequence")
-        request_body["position"] = params.get("position")
+        # PlantCAD2使用0-based，用户输入是1-based，需要转换
+        position = params.get("position")
+        if position is not None:
+            request_body["position"] = max(0, int(position) - 1)
         request_body["ref_allele"] = params.get("ref_allele")
         request_body["alt_alleles"] = params.get("alt_alleles")
 
     # 掩码预测
     elif task_id == 203:
         request_body["sequence"] = params.get("sequence")
-        request_body["positions"] = params.get("positions")
+        # PlantCAD2使用0-based，用户输入是1-based，需要转换
+        positions = params.get("positions")
+        if positions is not None:
+            request_body["positions"] = [max(0, int(p) - 1) for p in positions]
 
     # LoRA功能预测 (204-210)
     else:
