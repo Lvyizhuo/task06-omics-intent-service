@@ -265,10 +265,20 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
 
     logger.info(f"中置信度场景 | 推荐任务数={len(suggested_tasks)}")
 
-    # 如果只有一个推荐任务且提取到了参数，直接返回该任务的参数
+    # 提取通用参数（所有任务共有的参数，如sequence）
     params_to_return = None
-    if len(suggested_tasks) == 1 and suggested_tasks[0].task_id in extracted_params:
-        params_to_return = extracted_params[suggested_tasks[0].task_id]
+    if extracted_params:
+        # 从所有任务提取的参数中，找出通用参数
+        common_params = {}
+        for task_id, params in extracted_params.items():
+            for key, value in params.items():
+                # 如果这个参数在多个任务中都出现了，或者这是第一个任务的参数
+                if key not in common_params:
+                    common_params[key] = value
+
+        if common_params:
+            params_to_return = common_params
+            logger.info(f"中置信度返回通用参数 | params={list(common_params.keys())}")
 
     return IntentResponse(
         confidence="medium",
