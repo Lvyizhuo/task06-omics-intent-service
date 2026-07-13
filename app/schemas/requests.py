@@ -13,12 +13,14 @@ class SuggestedTask(BaseModel):
     model: str
     description: str
     guide_message: str
+    required_fields: List[str] = Field(default_factory=list, description="该任务需要的请求参数字段列表")
 
 # 可用任务（低置信度）
 class AvailableTask(BaseModel):
     task_id: int
     task_name: str
     model: str
+    required_fields: List[str] = Field(default_factory=list, description="该任务需要的请求参数字段列表")
 
 # 错误信息
 class ErrorInfo(BaseModel):

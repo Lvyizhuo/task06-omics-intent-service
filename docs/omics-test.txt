@@ -1,0 +1,163 @@
+# 组学智能体意图识别服务 - 测试用例
+
+> 注意：实际运行时 DNA 序列会作为参数传入下游 API（PlantCAD2 / EVO2），
+> 如果服务未部署或序列无效，参数提取仍会成功，但接口调用会报错。
+> 本测试主要验证**意图识别 + 参数提取**是否准确。
+
+## 1. 高置信度测试（应返回 task_id 和 params）
+
+### 1.1 掩码预测 (203)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "请帮我预测DNA序列ACGTACGTACGT在位置1,3,5的碱基概率分布",
+    "session_id": "test_001"
+  }'
+```
+
+### 1.2 变异打分 (202)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "请帮我评估序列ACGTACGTACGT在位置5处由A突变为G的变异影响",
+    "session_id": "test_002"
+  }'
+```
+
+### 1.3 嵌入提取 (201)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我提取这段DNA序列ATGCGTACGATCGATCGTACGATC的嵌入向量",
+    "session_id": "test_003"
+  }'
+```
+
+### 1.4 基因序列预测生成 (101 - EVO2)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我生成序列ACGTACGTACGT的后续序列",
+    "session_id": "test_004"
+  }'
+```
+
+### 1.5 表达量预测-开/关 (207)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测序列ACGTACGTACGT在叶片中是否表达",
+    "session_id": "test_005"
+  }'
+```
+
+### 1.6 表达量预测-绝对值 (208)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测这段序列ACGTACGTACGT在叶片中的具体表达水平数值",
+    "session_id": "test_006"
+  }'
+```
+
+### 1.7 ACR预测-拟南芥 (204)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "这段DNA序列ACGTACGTACGT在拟南芥中是不是活跃调控区域",
+    "session_id": "test_007"
+  }'
+```
+
+### 1.8 ACR预测-九物种 (205)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我预测ACGTACGTACGT是否属于活跃调控区域",
+    "session_id": "test_008"
+  }'
+```
+
+### 1.9 ACR预测-细胞类型 (206)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测ACGTACGTACGT在92种细胞类型中的调控状态",
+    "session_id": "test_009"
+  }'
+```
+
+### 1.10 翻译效率预测-开/关 (209)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "这段mRNA序列AUGCAUGCACGU会不会被翻译",
+    "session_id": "test_010"
+  }'
+```
+
+### 1.11 翻译效率预测-绝对值 (210)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我预测AUGCAUGCACGU的翻译效率数值",
+    "session_id": "test_011"
+  }'
+```
+
+## 2. 中置信度测试（应返回 suggested_tasks 推荐列表）
+
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我分析一下这段DNA序列ACGTACGTACGT",
+    "session_id": "test_012"
+  }'
+```
+
+## 3. 低置信度测试（应返回全部 available_tasks）
+
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "今天天气怎么样",
+    "session_id": "test_013"
+  }'
+```
+
+## 4. 健康检查
+
+```bash
+curl http://localhost:8010/health
+```
+
+## 预期验证要点
+
+| 用例 | 预期 confidence | 预期 task_id | 预期 task_name |
+|------|----------------|-------------|---------------|
+| 1.1 掩码预测 | high | 203 | 掩码预测 |
+| 1.2 变异打分 | high | 202 | 变异打分 |
+| 1.3 嵌入提取 | high | 201 | 嵌入提取 |
+| 1.4 序列生成 | high | 101 | 基因序列预测生成 |
+| 1.5 表达量开/关 | high | 207 | 表达量预测-开/关 |
+| 1.6 表达量绝对值 | high | 208 | 表达量预测-绝对值 |
+| 1.7 ACR拟南芥 | high | 204 | ACR预测-拟南芥 |
+| 1.8 ACR九物种 | high | 205 | ACR预测-九物种 |
+| 1.9 ACR细胞类型 | high | 206 | ACR预测-细胞类型 |
+| 1.10 翻译开/关 | high | 209 | 翻译效率预测-开/关 |
+| 1.11 翻译绝对值 | high | 210 | 翻译效率预测-绝对值 |
+| 2. 模糊分析 | medium | (推荐列表) | 返回4-5个相关任务 |
+| 3. 无关输入 | low | (全部任务) | 返回全部11个任务 |

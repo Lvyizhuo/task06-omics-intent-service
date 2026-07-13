@@ -2,10 +2,43 @@
 
 ## 基础信息
 
-| 项目 | 值 |
-|------|-----|
-| Base URL | `http://<服务器IP>:8010` |
-| Content-Type | `application/json` |
+| 项目           | 值                     |
+| ------------ | --------------------- |
+| Base URL     | `http://<服务器IP>:8010` |
+| Content-Type | `application/json`    |
+
+---
+
+## 0. 系统架构与服务调用流程
+
+### 整体架构
+
+```
+用户 → 第一次意图识别（路由到组学智能体） → 组学意图识别[本服务 :8010] →
+                                         → PlantCAD2 推理服务 :8005
+                                         → EVO2 转发接口 :8666
+                                 
+```
+
+### 调用流程说明
+
+| 步骤     | 说明                            |
+| ------ | ----------------------------- |
+| ① 意图识别 | 调用本地 Qwen3 模型，识别用户意图并匹配任务     |
+| ② 参数提取 | 从用户输入中提取任务所需的参数（如 DNA 序列、位置等） |
+| ③ 下游调用 | **高置信度时**，自动调用对应下游服务的 HTTP 接口 |
+| ④ 结果返回 | 将下游服务的返回结果包装后返回给用户            |
+
+### 高置信度自动调用逻辑
+
+当识别置信度为 **high** 时，服务会自动执行以下流程：
+
+1. 验证 `task_id` 是否合法
+2. 检查参数完整性（是否包含 `sequence` 或 `prompt`）
+3. 调用对应的下游接口（PlantCAD2 或 EVO2）
+4. 返回下游服务的计算结果
+
+**若下游调用失败**，自动降级为 **medium** 置信度，返回错误信息和推荐任务。
 
 ---
 
@@ -15,10 +48,10 @@
 
 ### 请求参数
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_input | string | 是 | 用户输入文本（1-10000字符）|
-| session_id | string | 否 | 会话ID |
+| 字段         | 类型     | 必填  | 说明                |
+| ---------- | ------ | --- | ----------------- |
+| user_input | string | 是   | 用户输入文本（1-10000字符） |
+| session_id | string | 否   | 会话ID              |
 
 ### 请求示例
 
@@ -31,18 +64,18 @@
 
 ### 响应参数
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| confidence | string | 置信度：`high` / `medium` / `low` |
-| task_id | int | 任务ID（high时返回）|
-| task_name | string | 任务名称（high时返回）|
-| model | string | 使用的模型（high时返回）|
-| params | object | 提取的参数（high时返回）|
-| result | object | 计算结果（high时返回）|
-| suggested_tasks | array | 推荐任务列表（medium时返回）|
-| available_tasks | array | 全部任务列表（low时返回）|
-| guide_message | string | 引导消息 |
-| error | object | 错误信息 |
+| 字段              | 类型     | 说明                            |
+| --------------- | ------ | ----------------------------- |
+| confidence      | string | 置信度：`high` / `medium` / `low` |
+| task_id         | int    | 任务ID（high时返回）                 |
+| task_name       | string | 任务名称（high时返回）                 |
+| model           | string | 使用的模型（high时返回）                |
+| params          | object | 提取的参数（high时返回）                |
+| result          | object | 计算结果（high时返回）                 |
+| suggested_tasks | array  | 推荐任务列表（medium时返回）             |
+| available_tasks | array  | 全部任务列表（low时返回）                |
+| guide_message   | string | 引导消息                          |
+| error           | object | 错误信息                          |
 
 ---
 
@@ -176,27 +209,184 @@
 
 ## 3. 错误码
 
-| 错误码 | 说明 |
-|--------|------|
-| 1001 | LLM服务调用失败 |
-| 1002 | 参数提取失败 |
-| 1003 | 下游接口调用失败 |
-| 1004 | 参数验证失败 |
+| 错误码  | 说明        | 触发场景                     |
+| ---- | --------- | ------------------------ |
+| 1001 | LLM服务调用失败 | Qwen3 模型不可用或超时           |
+| 1002 | 参数提取失败    | LLM 未能从用户输入中提取到有效参数      |
+| 1003 | 下游接口调用失败  | PlantCAD2/EVO2 接口返回错误或超时 |
+| 1004 | 参数验证失败    | 参数格式不合法（如下游接口返回 400）     |
+
+> **注意**：1003 和 1004 错误出现在 high 降级的 medium 置信度响应中，此时 `confidence` 为 `medium`，同时携带 `suggested_tasks` 和 `error` 字段。
 
 ---
 
 ## 4. 任务ID对照表
 
-| ID | 任务名称 | 模型 |
-|----|----------|------|
-| 101 | 基因序列预测生成 | EVO2 |
-| 201 | 嵌入提取 | PlantCAD2 |
-| 202 | 变异打分 | PlantCAD2 |
-| 203 | 掩码预测 | PlantCAD2 |
+| ID  | 任务名称      | 模型        |
+| --- | --------- | --------- |
+| 101 | 基因序列预测生成  | EVO2      |
+| 201 | 嵌入提取      | PlantCAD2 |
+| 202 | 变异打分      | PlantCAD2 |
+| 203 | 掩码预测      | PlantCAD2 |
 | 204 | ACR预测-拟南芥 | PlantCAD2 |
-| 205 | ACR预测-水稻 | PlantCAD2 |
-| 206 | ACR预测-大豆 | PlantCAD2 |
+| 205 | ACR预测-水稻  | PlantCAD2 |
+| 206 | ACR预测-大豆  | PlantCAD2 |
 | 207 | 表达量预测-开/关 | PlantCAD2 |
 | 208 | 表达量预测-绝对值 | PlantCAD2 |
 | 209 | 翻译效率预测-玉米 | PlantCAD2 |
 | 210 | 翻译效率预测-水稻 | PlantCAD2 |
+
+---
+
+## 5. 下游接口调用映射
+
+> **说明**：高置信度场景下，本服务会自动将请求转发到下游推理服务的对应接口。以下是各任务 ID 对应的下游接口详情。
+
+### 5.1 EVO2 接口（task_id=101）
+
+| 项目   | 值                                                        |
+| ---- | -------------------------------------------------------- |
+| 下游地址 | `POST {EVO2_BASE_URL}/api/v1/generate`                   |
+| 下游服务 | EVO2（环境变量 `EVO2_BASE_URL`，默认 http://36.137.205.153:8666） |
+
+**请求参数映射**（本服务参数 → 下游接口参数）：
+
+| 参数          | 类型     | 默认值   | 说明                                               |
+| ----------- | ------ | ----- | ------------------------------------------------ |
+| prompt      | string | 必填    | DNA 起始序列（支持 `params.prompt` 或 `params.sequence`） |
+| numTokens   | string | "200" | 生成长度                                             |
+| temperature | string | "0.6" | 采样温度                                             |
+| topK        | string | "4"   | Top-K 采样参数                                       |
+| topP        | string | "0.6" | Top-P 采样参数                                       |
+| showLogits  | string | "0"   | 是否返回 logits                                      |
+
+**结果结构**：
+
+```json
+{
+  "generated_sequence": "ATCG...（后续生成的完整序列）"
+}
+```
+
+### 5.2 PlantCAD2 基础功能（task_id=201~203）
+
+下游服务地址：环境变量 `PLANTCAD2_BASE_URL`，默认 http://localhost:8005
+
+#### 201 - 嵌入提取
+
+| 端点            | 请求方法 |
+| ------------- | ---- |
+| `/embeddings` | POST |
+
+**请求参数**：
+
+| 参数        | 类型        | 说明                      |
+| --------- | --------- | ----------------------- |
+| sequence  | string    | DNA 序列（IUPAC，最长 8192bp） |
+| normalize | bool (可选) | 是否归一化                   |
+
+**结果结构**：
+
+```json
+{
+  "embeddings": [[浮点数数组]],
+  "shape": [序列长度, 1536]
+}
+```
+
+#### 202 - 变异打分
+
+| 端点               | 请求方法 |
+| ---------------- | ---- |
+| `/variant-score` | POST |
+
+**请求参数**：
+
+| 参数          | 类型       | 说明                              |
+| ----------- | -------- | ------------------------------- |
+| sequence    | string   | DNA 序列                          |
+| position    | int      | 变异位置（自动将用户 1-based 转换为 0-based） |
+| ref_allele  | string   | 参考碱基（A/C/G/T）                   |
+| alt_alleles | string[] | 变异碱基列表                          |
+
+**结果结构**：
+
+```json
+{
+  "scores": {"A": -0.05, "C": -2.10, "G": -1.33, "T": -0.87}
+}
+```
+
+#### 203 - 掩码预测
+
+| 端点                | 请求方法 |
+| ----------------- | ---- |
+| `/masked-predict` | POST |
+
+**请求参数**：
+
+| 参数        | 类型     | 说明                                |
+| --------- | ------ | --------------------------------- |
+| sequence  | string | DNA 序列                            |
+| positions | int[]  | 预测位置列表（自动将用户 1-based 转换为 0-based） |
+
+**结果结构**：
+
+```json
+{
+  "predictions": {
+    "0": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
+    "5": {"A": 0.80, "C": 0.05, "G": 0.10, "T": 0.05}
+  }
+}
+```
+
+### 5.3 PlantCAD2 LoRA 功能预测（task_id=204~210）
+
+所有 LoRA 任务共用 `/predict` 端点，通过 `task` 参数区分：
+
+| task_id | 端点         | task 参数值               | 预测类型           |
+| ------- | ---------- | ---------------------- | -------------- |
+| 204     | `/predict` | `acr_arabidopsis`      | 二分类            |
+| 205     | `/predict` | `acr_nine_species`     | 二分类            |
+| 206     | `/predict` | `acr_cell_type`        | 多标签分类（92种细胞类型） |
+| 207     | `/predict` | `expression_on_off`    | 二分类            |
+| 208     | `/predict` | `expression_absolute`  | 回归             |
+| 209     | `/predict` | `translation_on_off`   | 二分类            |
+| 210     | `/predict` | `translation_absolute` | 回归             |
+
+**请求参数**：
+
+| 参数       | 类型     | 说明                      |
+| -------- | ------ | ----------------------- |
+| sequence | string | DNA 序列                  |
+| task     | string | LoRA 任务标识（由本服务自动填充，见上表） |
+
+**结果结构**：
+
+- **二分类任务（204/205/207/209）**：
+  
+  ```json
+  {
+    "prediction": "active/inactive",
+    "probability": 0.95
+  }
+  ```
+
+- **多标签分类任务（206）**：
+  
+  ```json
+  {
+    "prediction": ["细胞类型A", "细胞类型B", ...],
+    "num_labels": 92,
+    "probabilities": [0.1, 0.05, ...]
+  }
+  ```
+
+- **回归任务（208/210）**：
+  
+  ```json
+  {
+    "prediction": 3.45
+  }
+  ```

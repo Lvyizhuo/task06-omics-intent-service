@@ -33,7 +33,9 @@ vim .env
 ```
 
 必须配置的项：
-- `LLM_API_KEY`：阿里云百炼 API Key
+- `LLM_BASE_URL`：本地 Qwen3 服务地址，默认 `http://localhost:8000/v1`
+- `LLM_MODEL`：模型名称，与 Qwen3 部署时的 model 参数一致，默认 `qwen3-30b`
+- `LLM_API_KEY`：本地模型不需要鉴权，填入任意占位即可（如 `not-needed`）
 
 ### 2. Docker 部署（推荐）
 
@@ -188,9 +190,9 @@ sudo systemctl status omics-intent
 
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `LLM_API_KEY` | ✅ | - | 阿里云百炼 API Key |
-| `LLM_BASE_URL` | ❌ | `https://dashscope.aliyuncs.com/compatible-mode/v1` | LLM 服务地址 |
-| `LLM_MODEL` | ❌ | `qwen-plus-latest` | LLM 模型名称 |
+| `LLM_API_KEY` | ❌ | `not-needed` | 本地模型不需要鉴权，OpenAI SDK 需要非空值 |
+| `LLM_BASE_URL` | ❌ | `http://localhost:8000/v1` | LLM 服务地址 |
+| `LLM_MODEL` | ❌ | `qwen3-30b` | LLM 模型名称 |
 | `PLANTCAD2_BASE_URL` | ❌ | `http://localhost:8005` | PlantCAD2 服务地址 |
 | `EVO2_BASE_URL` | ❌ | `http://36.137.205.153:8666` | EVO2 服务地址 |
 | `HOST` | ❌ | `0.0.0.0` | 服务监听地址 |
@@ -300,11 +302,15 @@ docker-compose logs omics-intent
 
 #### 2. LLM 调用失败
 
-**检查 API Key：**
+**检查 Qwen3 服务连通性：**
 ```bash
-# 测试 API 连通性
-curl -H "Authorization: Bearer $LLM_API_KEY" \
-  "$LLM_BASE_URL/models"
+# 测试模型 API 连通性
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-30b",
+    "messages": [{"role": "user", "content": "预测这段DNA序列对应的mRNA在叶片中的翻译效率绝对值：CTTAATTAATATTGCCTTTGTAATAACGCGCGAAACACAAATCTTCTCTGCCTAATGCAGTAGTCATGTGTTGACTCCTTCAAAATTTCCAAGAAGTTAGTGGCTGGTGTGTCATTGTCTTCATCTTTTTTTTTTTTTTTTTAAAAATTGAATGCGACATGTACTCCTCAACGTATAAGCTCAATGCTTGTTACTGAAACATCTCTTGTCTGATTTTTTCAGGCTAAGTCTTACAGAAAGTGATTGGGCACTTCAATGGCTTTCACAAATGAAAAAGATGGATCTAAGGGATTTGTGAAGAGAGTGGCTTCATCTTTCTCCATGAGGAAGAAGAAGAATGCAACAAGTGAACCCAAGTTGCTTCCAAGATCGAAATCAACAGGTTCTGCTAACTTTGAATCCATGAGGCTACCTGCAACGAAGAAGATTTCAGATGTCACAAACAAAACAAGGATCAAACCATTAGGTGGTGTAGCACCAGCACAACCAAGAAGGGAAAAGATCGATGATCG"}]
+  }'
 ```
 
 **查看错误日志：**
@@ -407,8 +413,7 @@ sudo systemctl restart omics-intent
 
 1. **API Key 安全**
    - 不要将 `.env` 文件提交到版本控制
-   - 定期轮换 API Key
-   - 使用密钥管理服务（如 AWS Secrets Manager）
+   - 生产环境建议使用环境变量而非 `.env` 文件
 
 2. **网络安全**
    - 仅暴露必要的端口

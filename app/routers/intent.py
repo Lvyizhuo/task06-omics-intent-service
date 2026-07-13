@@ -138,7 +138,7 @@ async def recognize_user_intent(request: IntentRequest):
             confidence="low",
             guide_message="抱歉，处理过程中出现错误，请稍后重试。您可以直接选择需要的任务。",
             available_tasks=[
-                AvailableTask(task_id=tid, task_name=details["name"], model=details["model"])
+                AvailableTask(task_id=tid, task_name=details["name"], model=details["model"], required_fields=details.get("data_fields", []))
                 for tid, details in TASK_DETAILS.items()
             ],
             error=ErrorInfo(code=1001, message="意图识别失败", detail=str(e)),
@@ -169,7 +169,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
             confidence="low",
             guide_message=f"识别到的任务ID({task_id})无效，请重新选择任务。",
             available_tasks=[
-                AvailableTask(task_id=tid, task_name=details["name"], model=details["model"])
+                AvailableTask(task_id=tid, task_name=details["name"], model=details["model"], required_fields=details.get("data_fields", []))
                 for tid, details in TASK_DETAILS.items()
             ],
             error=ErrorInfo(code=1001, message="任务ID无效", detail=f"task_id={task_id}不在支持范围内"),
@@ -192,6 +192,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                     model=model,
                     description=TASK_DETAILS.get(task_id, {}).get("description", ""),
                     guide_message=dynamic_guide,
+                    required_fields=TASK_DETAILS.get(task_id, {}).get("data_fields", []),
                 )
             ],
             guide_message=f"已识别到您需要进行{task_name}，但缺少必要的数据。{dynamic_guide}",
@@ -251,6 +252,7 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
                     model=model,
                     description=TASK_DETAILS.get(task_id, {}).get("description", ""),
                     guide_message=TASK_DETAILS.get(task_id, {}).get("guide_message", "请提供DNA序列"),
+                    required_fields=TASK_DETAILS.get(task_id, {}).get("data_fields", []),
                 )
             ],
             guide_message=f"已识别到您需要进行{task_name}，但参数有误：{error_detail}",
@@ -305,6 +307,7 @@ async def handle_medium_confidence(intent_result: dict, user_input: str) -> Inte
                 model=model,
                 description=task.get("description", ""),
                 guide_message=task.get("guide_message", ""),
+                required_fields=task.get("required_fields", []),
             ))
 
     logger.info(f"中置信度场景 | 推荐任务数={len(suggested_tasks)}")
@@ -353,6 +356,7 @@ async def handle_low_confidence(intent_result: dict, user_input: str) -> IntentR
                 task_id=task.get("task_id", 0),
                 task_name=task.get("task_name", ""),
                 model=task.get("model", ""),
+                required_fields=task.get("required_fields", []),
             ))
 
     logger.info(f"低置信度场景 | 可用任务数={len(available_tasks)}")

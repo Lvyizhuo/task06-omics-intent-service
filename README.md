@@ -30,9 +30,9 @@
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| LLM_API_KEY | 大模型API Key | (必填) |
-| LLM_BASE_URL | 大模型服务地址 | https://dashscope.aliyuncs.com/compatible-mode/v1 |
-| LLM_MODEL | 大模型名称 | qwen-plus-latest |
+| LLM_API_KEY | 大模型API Key（本地模型不需要鉴权，填占位即可） | not-needed |
+| LLM_BASE_URL | 大模型服务地址 | http://localhost:8000/v1 |
+| LLM_MODEL | 大模型名称 | qwen3-30b |
 | PLANTCAD2_BASE_URL | PlantCAD2服务地址 | http://localhost:8005 |
 | EVO2_BASE_URL | EVO2服务地址 | http://36.137.205.153:8666 |
 

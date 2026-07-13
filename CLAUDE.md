@@ -21,7 +21,7 @@
 ## 技术栈
 
 - FastAPI + Uvicorn
-- OpenAI SDK（兼容阿里云百炼 qwen-plus-latest）
+- OpenAI SDK（兼容本地 Qwen3 OpenAI 接口）
 - httpx（异步 HTTP 客户端）
 - loguru（日志）
 
@@ -39,7 +39,8 @@
 ## 启动方式
 
 ```bash
-export LLM_API_KEY="your-api-key"
+# 默认使用本地 Qwen3 模型，无需 API Key
+# 如需覆盖配置，通过 .env 文件或环境变量设置
 uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
@@ -49,7 +50,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8010
 |------|------|------|
 | PlantCAD2 | http://localhost:8005 | DNA 模型推理（7个LoRA任务 + 3个基础功能） |
 | EVO2 | http://36.137.205.153:8666 | 基因序列预测生成 |
-| 阿里云百炼 | https://dashscope.aliyuncs.com/compatible-mode/v1 | LLM 服务 |
+| 本地 Qwen3 | http://localhost:8000/v1 | LLM 服务 |
 
 ## 支持的任务（11个）
 

@@ -16,10 +16,10 @@ else:
 
 @dataclass
 class Settings:
-    # LLM 配置 (qwen3.7-max via 阿里云百炼)
-    llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
-    llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
-    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "qwen-plus-latest"))
+    # LLM 配置（默认使用本地部署的 Qwen3，OpenAI 兼容接口）
+    llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", "not-needed"))
+    llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "http://localhost:8000/v1"))
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "qwen3-30b"))
 
     # 下游服务地址
     plantcad2_base_url: str = field(default_factory=lambda: os.getenv("PLANTCAD2_BASE_URL", "http://localhost:8005"))

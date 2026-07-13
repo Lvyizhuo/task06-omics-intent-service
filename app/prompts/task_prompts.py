@@ -38,7 +38,7 @@ TASK_DETAILS = {
         "description": "给定一段基因序列，预测并生成后续序列",
         "guide_message": "请提供起始DNA序列，我将为您预测生成后续序列",
         "keywords": ["生成", "预测序列", "续写", "序列生成", "基因生成", "DNA生成", "后续序列", "延伸", "扩展序列"],
-        "data_fields": ["prompt", "numTokens", "temperature", "topK", "topP"],
+        "data_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"],
     },
     201: {
         "name": "嵌入提取",

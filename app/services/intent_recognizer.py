@@ -13,7 +13,7 @@ from app.config import settings
 from app.prompts.system_prompt import SYSTEM_PROMPT
 from app.prompts.task_prompts import TASK_DETAILS, TASK_NAME_MAP, TASK_MODEL_MAP
 
-# 初始化 OpenAI 客户端（兼容阿里云百炼）
+# 初始化 OpenAI 客户端（兼容本地 Qwen3 OpenAI 接口）
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
     base_url=settings.llm_base_url,
@@ -145,6 +145,7 @@ def enrich_intent_result(result: Dict[str, Any]) -> Dict[str, Any]:
                         "model": detail["model"],
                         "description": detail["description"],
                         "guide_message": detail["guide_message"],
+                        "required_fields": detail.get("data_fields", []),
                     })
             result["suggested_tasks"] = suggested_details
 
@@ -156,7 +157,7 @@ def enrich_intent_result(result: Dict[str, Any]) -> Dict[str, Any]:
     else:
         if "available_tasks" not in result:
             result["available_tasks"] = [
-                {"task_id": tid, "task_name": details["name"], "model": details["model"]}
+                {"task_id": tid, "task_name": details["name"], "model": details["model"], "required_fields": details.get("data_fields", [])}
                 for tid, details in TASK_DETAILS.items()
             ]
         if "guide_message" not in result:
