@@ -209,8 +209,8 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         if task_id == 101:
             evo2_tip = " 当前结果基于默认参数计算（numTokens=200, temperature=0.6, topK=4, topP=0.6, showLogits=0），如需自定义参数，请手动选择EVO2任务并指定参数。"
 
-        # 提取 PlantCAD2 /report 接口返回的 markdown 报告
-        markdown_report = result.get("markdown") if task_id != 101 else None
+        # 提取下游接口返回的 markdown 报告（EVO2 无此字段，自然返回 None）
+        markdown_report = result.get("markdown")
 
         # 填充完整的字段结构
         full_params = fill_all_params(params)

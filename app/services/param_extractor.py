@@ -131,8 +131,9 @@ def validate_params(params: Dict[str, Any], task_id: int) -> Dict[str, Any]:
     # 验证DNA序列
     sequence = params.get("sequence") or params.get("prompt", "")
     if sequence:
-        # 清理序列：只保留IUPAC碱基字符
+        # 清理序列：U→T 转换（mRNA 转 DNA 兼容），只保留 IUPAC 碱基字符
         sequence = sequence.upper().strip()
+        sequence = sequence.replace('U', 'T')
         sequence = re.sub(r'[^ACGTNRYSWKMBDHV]', '', sequence)
         if sequence:
             if task_id == 101:

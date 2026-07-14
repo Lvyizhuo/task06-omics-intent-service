@@ -1,0 +1,295 @@
+# 组学智能体意图识别服务 - 新 /report 接口测试用例
+
+> 本测试针对 PlantCAD2 新统一接口 **POST /report** 验证。
+> 新接口特点：
+> - 所有 PlantCAD2 任务统一走 `/report` 端点，通过 `type` 字段区分
+> - 响应新增 `markdown` 字段，包含前端可渲染的 Markdown 推理报告
+> - 位置参数改为 **1-based**（与用户习惯一致）
+> - 返回的 `suggested_tasks` / `available_tasks` 中新增 `required_fields` 字段
+>
+> 注意：实际运行时 DNA 序列会作为参数传入下游 API（PlantCAD2 /report 或 EVO2），
+> 如果服务未部署或序列无效，参数提取仍会成功，但接口调用会报错。
+> 本测试主要验证**意图识别 + 参数提取 + /report 接口调用 + markdown 输出**是否正常。
+
+## 1. 高置信度测试（应返回 task_id, params, result, markdown）
+
+### 1.1 掩码预测 (203) → type=masked_predict
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "请帮我预测DNA序列ACGTACGTACGT在位置1,3,5的碱基概率分布",
+    "session_id": "report_test_001"
+  }'
+```
+
+### 1.2 变异打分 (202) → type=variant_score
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "请帮我评估序列ACGTACGTACGT在位置5处由A突变为G的变异影响",
+    "session_id": "report_test_002"
+  }'
+```
+
+### 1.3 嵌入提取 (201) → type=embedding
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我提取这段DNA序列ATGCGTACGATCGATCGTACGATC的嵌入向量",
+    "session_id": "report_test_003"
+  }'
+```
+
+### 1.4 基因序列预测生成 (101 - EVO2，不走 /report)
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我生成序列ACGTACGTACGT的后续序列",
+    "session_id": "report_test_004"
+  }'
+```
+
+### 1.5 表达量预测-开/关 (207) → type=predict + task=expression_on_off
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测序列ACGTACGTACGT在叶片中是否表达",
+    "session_id": "report_test_005"
+  }'
+```
+
+### 1.6 表达量预测-绝对值 (208) → type=predict + task=expression_absolute
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测这段序列ACGTACGTACGT在叶片中的具体表达水平数值",
+    "session_id": "report_test_006"
+  }'
+```
+
+### 1.7 ACR预测-拟南芥 (204) → type=predict + task=acr_arabidopsis
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "这段DNA序列ACGTACGTACGT在拟南芥中是不是活跃调控区域",
+    "session_id": "report_test_007"
+  }'
+```
+
+### 1.8 ACR预测-九物种 (205) → type=predict + task=acr_nine_species
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我预测ACGTACGTACGT是否属于活跃调控区域",
+    "session_id": "report_test_008"
+  }'
+```
+
+### 1.9 ACR预测-细胞类型 (206) → type=predict + task=acr_cell_type
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "预测ACGTACGTACGT在92种细胞类型中的调控状态",
+    "session_id": "report_test_009"
+  }'
+```
+
+### 1.10 翻译效率预测-开/关 (209) → type=predict + task=translation_on_off
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "这段mRNA序列AUGCAUGCACGU会不会被翻译",
+    "session_id": "report_test_010"
+  }'
+```
+
+### 1.11 翻译效率预测-绝对值 (210) → type=predict + task=translation_absolute
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我预测AUGCAUGCACGU的翻译效率数值",
+    "session_id": "report_test_011"
+  }'
+```
+
+---
+
+## 2. 中置信度测试（应返回 suggested_tasks + required_fields）
+
+### 2.1 模糊分析意图
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我分析一下这段DNA序列ACGTACGTACGT",
+    "session_id": "report_test_012"
+  }'
+```
+
+### 2.2 仅提供裸序列（无任务关键词）→ 应返回 medium，不再错误地走 high
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "ACGTCGCTGCTCGCTCGCCTG",
+    "session_id": "report_test_013"
+  }'
+```
+
+---
+
+## 3. 低置信度测试（应返回全部 available_tasks + required_fields）
+
+### 3.1 无关输入
+```bash
+curl http://localhost:8010/intent/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "今天天气怎么样",
+    "session_id": "report_test_014"
+  }'
+```
+
+---
+
+## 4. 健康检查
+```bash
+curl http://localhost:8010/health
+```
+
+---
+
+## 5. 预期的响应结构
+
+### 5.1 高置信度响应示例（PlantCAD2 任务）
+```json
+{
+  "confidence": "high",
+  "task_id": 202,
+  "task_name": "变异打分",
+  "model": "PlantCAD2",
+  "params": {
+    "sequence": "ACGTACGTACGT",
+    "position": 5,
+    "ref_allele": "A",
+    "alt_alleles": ["G"],
+    "normalize": null,
+    "prompt": null,
+    "positions": null,
+    "numTokens": null,
+    "temperature": null,
+    "topK": null,
+    "topP": null,
+    "showLogits": null
+  },
+  "result": {
+    "type": "variant_score",
+    "result": {
+      "scores": {"G": -0.80, "C": -0.76, "T": 0.77},
+      "ref_prob": 0.246,
+      "alt_probs": {"G": 0.110, "C": 0.115, "T": 0.529}
+    },
+    "markdown": "# PlantCAD2 模型推理报告\n\n**来源**：组学智能体 — PlantCAD 模型推理服务\n..."
+  },
+  "markdown": "# PlantCAD2 模型推理报告\n\n**来源**：组学智能体 — PlantCAD 模型推理服务\n...",
+  "guide_message": "已为您完成变异打分。变异打分结果：G: -0.80, C: -0.76, T: 0.77",
+  "suggested_tasks": null,
+  "available_tasks": null,
+  "error": null
+}
+```
+
+> **验证要点**：
+> - ✅ `result` 字段内层包含 `type`、`result`（原始数据）、`markdown`（报告）
+> - ✅ 顶级 `markdown` 字段存在且内容与 `result.markdown` 一致
+> - ✅ `result.result` 中的 scores 数据与旧接口一致
+
+### 5.2 中置信度响应示例
+```json
+{
+  "confidence": "medium",
+  "params": {
+    "sequence": "ACGTACGTACGT",
+    "position": null,
+    ...
+  },
+  "suggested_tasks": [
+    {
+      "task_id": 201,
+      "task_name": "嵌入提取",
+      "model": "PlantCAD2",
+      "description": "提取DNA序列每个位置的1536维向量表示...",
+      "guide_message": "已识别到您需要进行嵌入提取，请提供：DNA序列",
+      "required_fields": ["sequence", "normalize"]
+    },
+    {
+      "task_id": 202,
+      "task_name": "变异打分",
+      "model": "PlantCAD2",
+      "description": "评估单核苷酸变异的致病性...",
+      "guide_message": "已识别到您需要进行变异打分，请提供：DNA序列、变异位置、参考碱基、变异碱基",
+      "required_fields": ["sequence", "position", "ref_allele", "alt_alleles"]
+    }
+  ],
+  "guide_message": "已识别到您提供了一段DNA序列，请告诉我您想要进行哪种分析？",
+  "available_tasks": null,
+  "error": null
+}
+```
+
+> **验证要点**：
+> - ✅ 每个 `suggested_tasks` 项中新增 `required_fields` 数组
+> - ✅ 裸序列输入（2.2）返回 medium 而非 high
+
+### 5.3 低置信度响应示例
+```json
+{
+  "confidence": "low",
+  "guide_message": "您好！我是组学智能体...",
+  "available_tasks": [
+    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2", "required_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"]},
+    {"task_id": 201, "task_name": "嵌入提取", "model": "PlantCAD2", "required_fields": ["sequence", "normalize"]},
+    {"task_id": 202, "task_name": "变异打分", "model": "PlantCAD2", "required_fields": ["sequence", "position", "ref_allele", "alt_alleles"]},
+    ...
+  ],
+  "params": null,
+  "suggested_tasks": null,
+  "error": null
+}
+```
+
+> **验证要点**：
+> - ✅ 每个 `available_tasks` 项中新增 `required_fields` 数组
+> - ✅ EVO2 (101) 的 `required_fields` 包含 showLogits
+
+---
+
+## 预期验证总表
+
+| 用例 | 预期 confidence | 预期 task_id | 下游 endpoint | 新增验证点 |
+|------|----------------|-------------|---------------|-----------|
+| 1.1 掩码预测 | high | 203 | `/report` type=masked_predict | markdown 字段 |
+| 1.2 变异打分 | high | 202 | `/report` type=variant_score | markdown 字段, 位置1-based |
+| 1.3 嵌入提取 | high | 201 | `/report` type=embedding | markdown 字段 |
+| 1.4 序列生成 | high | 101 | EVO2 旧接口 | markdown 为 null |
+| 1.5 表达量开/关 | high | 207 | `/report` type=predict | markdown 字段 |
+| 1.6 表达量绝对值 | high | 208 | `/report` type=predict | markdown 字段 |
+| 1.7 ACR拟南芥 | high | 204 | `/report` type=predict | markdown 字段 |
+| 1.8 ACR九物种 | high | 205 | `/report` type=predict | markdown 字段 |
+| 1.9 ACR细胞类型 | high | 206 | `/report` type=predict | markdown 字段 |
+| 1.10 翻译开/关 | high | 209 | `/report` type=predict | markdown 字段 |
+| 1.11 翻译绝对值 | high | 210 | `/report` type=predict | markdown 字段 |
+| 2.1 模糊分析 | medium | (推荐列表) | — | required_fields |
+| 2.2 裸序列 | medium | (推荐列表) | — | 不再错误走 high |
+| 3.1 无关输入 | low | (全部任务) | — | required_fields |

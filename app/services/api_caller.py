@@ -74,7 +74,8 @@ def build_request_body(task_id: int, params: Dict[str, Any],
     # ── PlantCAD2 统一 /report 接口 ──
     else:
         request_body["type"] = api_type
-        request_body["sequence"] = params.get("sequence", "")
+        # U→T 转换：兼容 mRNA 序列（翻译任务中用户可能输入 U）
+        request_body["sequence"] = params.get("sequence", "").replace('U', 'T')
 
         if api_type == "embedding":               # 201 嵌入提取
             if "normalize" in params:
@@ -184,11 +185,8 @@ def format_result_for_user(task_id: int, result: Dict[str, Any]) -> str:
     task_name = TASK_NAME_MAP.get(task_id, "未知任务")
 
     # PlantCAD2 /report 接口的内层 result 包含原始推理数据
-    # EVO2 仍然返回原始格式，不需要提取
-    if task_id != 101 and "result" in result and isinstance(result.get("result"), dict):
-        inner = result["result"]
-    else:
-        inner = result
+    # EVO2 直接返回 flat dict，用 .get("result", result) 透明兼容
+    inner = result.get("result", result) if task_id != 101 else result
 
     # EVO2 基因序列预测生成
     if task_id == 101:
