@@ -36,6 +36,7 @@ class IntentResponse(BaseModel):
     model: Optional[str] = None
     params: Optional[Dict[str, Any]] = None
     result: Optional[Dict[str, Any]] = None
+    markdown: Optional[str] = Field(None, description="PlantCAD2 自动生成的 Markdown 推理报告，前端可直接渲染")
     suggested_tasks: Optional[List[SuggestedTask]] = None
     guide_message: str
     available_tasks: Optional[List[AvailableTask]] = None
