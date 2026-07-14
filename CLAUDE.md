@@ -13,7 +13,7 @@
                                  → EVO2转发接口:8666
 ```
 
-- **PlantCaduceus** (`/Users/lvyizhuo/project/i/PlantCaduceus`)：DNA 模型推理服务，提供 `/embeddings`、`/variant-score`、`/masked-predict`、`/predict` 等接口
+- **PlantCaduceus** (`/Users/lvyizhuo/project/i/PlantCaduceus`)：DNA 模型推理服务，统一提供 `POST /report` 接口（通过 `type` 字段区分：embedding / variant_score / masked_predict / predict）
 - **本服务** (`/Users/lvyizhuo/project/i/task06-omics-intent-service`)：意图识别 + 参数提取 + 调度转发
 
 两个项目**无代码耦合**，仅通过 HTTP 通信。

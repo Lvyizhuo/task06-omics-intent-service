@@ -6,9 +6,9 @@
 
 ## 功能特性
 
-- **高置信度场景**: 直接提取参数并调用下游接口，返回计算结果
-- **中置信度场景**: 推荐4-5个相关任务，引导用户提供数据
-- **低置信度场景**: 展示所有可用任务，兜底引导
+- **高置信度场景**: 直接提取参数并调用下游接口，返回计算结果（含 Markdown 推理报告）
+- **中置信度场景**: 推荐相关任务（含 `required_fields` 供前端渲染），引导用户提供数据
+- **低置信度场景**: 展示所有可用任务（含 `required_fields`），兜底引导
 
 ## 支持的任务
 
@@ -63,16 +63,37 @@ uvicorn app.main:app --host 0.0.0.0 --port 8010
 }
 ```
 
-**响应示例 (高置信度):**
+**响应示例 (高置信度，PlantCAD2 任务):**
 ```json
 {
   "confidence": "high",
-  "task_id": 207,
-  "task_name": "表达量预测-开/关",
+  "task_id": 202,
+  "task_name": "变异打分",
   "model": "PlantCAD2",
-  "params": {"sequence": "ACGT...", "task": "expression_on_off"},
-  "result": {"task": "expression_on_off", "prediction": "POSITIVE", "probability": 0.87},
-  "guide_message": "已为您完成表达量预测-开/关。表达量预测-开/关结果：POSITIVE（概率：87.0%）"
+  "params": {
+    "sequence": "ACGTACGTACGT",
+    "position": 5,
+    "ref_allele": "A",
+    "alt_alleles": ["G"],
+    "normalize": null,
+    "prompt": null,
+    "positions": null,
+    "numTokens": null,
+    "temperature": null,
+    "topK": null,
+    "topP": null,
+    "showLogits": null
+  },
+  "result": {
+    "type": "variant_score",
+    "result": {"scores": {"G": -0.80, "C": -0.76, "T": 0.77}},
+    "markdown": "# PlantCAD2 模型推理报告\\n..."
+  },
+  "markdown": "# PlantCAD2 模型推理报告\\n...",
+  "guide_message": "已为您完成变异打分。变异打分结果：G: -0.80, C: -0.76, T: 0.77",
+  "suggested_tasks": null,
+  "available_tasks": null,
+  "error": null
 }
 ```
 

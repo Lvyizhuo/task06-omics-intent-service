@@ -15,9 +15,8 @@
 
 ```
 用户 → 第一次意图识别（路由到组学智能体） → 组学意图识别[本服务 :8010] →
-                                         → PlantCAD2 推理服务 :8005
+                                         → PlantCAD2 推理服务 :8005（统一 /report 接口）
                                          → EVO2 转发接口 :8666
-                                 
 ```
 
 ### 调用流程说明
@@ -70,10 +69,11 @@
 | task_id         | int    | 任务ID（high时返回）                 |
 | task_name       | string | 任务名称（high时返回）                 |
 | model           | string | 使用的模型（high时返回）                |
-| params          | object | 提取的参数（high时返回）                |
-| result          | object | 计算结果（high时返回）                 |
-| suggested_tasks | array  | 推荐任务列表（medium时返回）             |
-| available_tasks | array  | 全部任务列表（low时返回）                |
+| params          | object | 提取的参数（high/medium/low时返回，包含所有可能的参数字段，未提取到的为null） |
+| result          | object | 计算结果（high时返回，PlantCAD2任务含内层result和markdown） |
+| markdown        | string | PlantCAD2自动生成的Markdown推理报告（high时返回，前端可直接渲染；EVO2任务为null） |
+| suggested_tasks | array  | 推荐任务列表（medium时返回，每项含required_fields） |
+| available_tasks | array  | 全部任务列表（low时返回，每项含required_fields） |
 | guide_message   | string | 引导消息                          |
 | error           | object | 错误信息                          |
 
@@ -84,16 +84,34 @@
 ```json
 {
   "confidence": "high",
-  "task_id": 201,
-  "task_name": "嵌入提取",
+  "task_id": 202,
+  "task_name": "变异打分",
   "model": "PlantCAD2",
   "params": {
-    "sequence": "ATGCGATCGATCGATCG"
+    "sequence": "ACGTACGTACGT",
+    "position": 5,
+    "ref_allele": "A",
+    "alt_alleles": ["G"],
+    "normalize": null,
+    "prompt": null,
+    "positions": null,
+    "numTokens": null,
+    "temperature": null,
+    "topK": null,
+    "topP": null,
+    "showLogits": null
   },
   "result": {
-    "embeddings": [[0.123, 0.456, 0.789]]
+    "type": "variant_score",
+    "result": {
+      "scores": {"G": -0.80, "C": -0.76, "T": 0.77},
+      "ref_prob": 0.246,
+      "alt_probs": {"G": 0.110, "C": 0.115, "T": 0.529}
+    },
+    "markdown": "# PlantCAD2 模型推理报告\n\n**来源**：组学智能体 — PlantCAD 模型推理服务\n..."
   },
-  "guide_message": "已完成嵌入提取任务",
+  "markdown": "# PlantCAD2 模型推理报告\n\n**来源**：组学智能体 — PlantCAD 模型推理服务\n...",
+  "guide_message": "已为您完成变异打分。变异打分结果：G: -0.80, C: -0.76, T: 0.77",
   "suggested_tasks": null,
   "available_tasks": null,
   "error": null
@@ -108,22 +126,35 @@
   "task_id": null,
   "task_name": null,
   "model": null,
-  "params": null,
+  "params": {
+    "sequence": "ACGTACGTACGT",
+    "normalize": null,
+    "position": null,
+    "positions": null,
+    "prompt": null,
+    "numTokens": null,
+    "temperature": null,
+    "topK": null,
+    "topP": null,
+    "showLogits": null
+  },
   "result": null,
   "suggested_tasks": [
     {
       "task_id": 207,
       "task_name": "表达量预测-开/关",
       "model": "PlantCAD2",
-      "description": "预测基因是否表达",
-      "guide_message": "请提供DNA序列"
+      "description": "预测基因在叶片中是否表达",
+      "guide_message": "请提供DNA序列，我将预测其在叶片中是否表达",
+      "required_fields": ["sequence"]
     },
     {
       "task_id": 208,
       "task_name": "表达量预测-绝对值",
       "model": "PlantCAD2",
-      "description": "预测基因表达水平",
-      "guide_message": "请提供DNA序列"
+      "description": "预测基因在叶片中的表达水平",
+      "guide_message": "请提供DNA序列，我将预测其在叶片中的表达水平",
+      "required_fields": ["sequence"]
     }
   ],
   "guide_message": "您想预测基因是否表达（开/关），还是预测具体的表达水平？请提供DNA序列。",
@@ -142,20 +173,21 @@
   "model": null,
   "params": null,
   "result": null,
+  "markdown": null,
   "suggested_tasks": null,
   "guide_message": "您好！请选择您需要的任务，并提供DNA序列。",
   "available_tasks": [
-    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2"},
-    {"task_id": 201, "task_name": "嵌入提取", "model": "PlantCAD2"},
-    {"task_id": 202, "task_name": "变异打分", "model": "PlantCAD2"},
-    {"task_id": 203, "task_name": "掩码预测", "model": "PlantCAD2"},
-    {"task_id": 204, "task_name": "ACR预测-拟南芥", "model": "PlantCAD2"},
-    {"task_id": 205, "task_name": "ACR预测-水稻", "model": "PlantCAD2"},
-    {"task_id": 206, "task_name": "ACR预测-大豆", "model": "PlantCAD2"},
-    {"task_id": 207, "task_name": "表达量预测-开/关", "model": "PlantCAD2"},
-    {"task_id": 208, "task_name": "表达量预测-绝对值", "model": "PlantCAD2"},
-    {"task_id": 209, "task_name": "翻译效率预测-玉米", "model": "PlantCAD2"},
-    {"task_id": 210, "task_name": "翻译效率预测-水稻", "model": "PlantCAD2"}
+    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2", "required_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"]},
+    {"task_id": 201, "task_name": "嵌入提取", "model": "PlantCAD2", "required_fields": ["sequence", "normalize"]},
+    {"task_id": 202, "task_name": "变异打分", "model": "PlantCAD2", "required_fields": ["sequence", "position", "ref_allele", "alt_alleles"]},
+    {"task_id": 203, "task_name": "掩码预测", "model": "PlantCAD2", "required_fields": ["sequence", "positions"]},
+    {"task_id": 204, "task_name": "ACR预测-拟南芥", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 205, "task_name": "ACR预测-九物种", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 206, "task_name": "ACR预测-细胞类型", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 207, "task_name": "表达量预测-开/关", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 208, "task_name": "表达量预测-绝对值", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 209, "task_name": "翻译效率预测-开/关", "model": "PlantCAD2", "required_fields": ["sequence"]},
+    {"task_id": 210, "task_name": "翻译效率预测-绝对值", "model": "PlantCAD2", "required_fields": ["sequence"]}
   ],
   "error": null
 }
@@ -169,15 +201,22 @@
   "task_id": null,
   "task_name": null,
   "model": null,
-  "params": null,
+  "params": {
+    "sequence": "ACGTACGTACGT",
+    "normalize": null,
+    "position": null,
+    ...
+  },
   "result": null,
+  "markdown": null,
   "suggested_tasks": [
     {
       "task_id": 201,
       "task_name": "嵌入提取",
       "model": "PlantCAD2",
-      "description": "提取DNA序列的嵌入向量",
-      "guide_message": "请提供DNA序列"
+      "description": "提取DNA序列每个位置的1536维向量表示",
+      "guide_message": "请提供DNA序列（IUPAC碱基，最长8192bp），我将为您提取嵌入向量",
+      "required_fields": ["sequence", "normalize"]
     }
   ],
   "guide_message": "已识别到您需要进行嵌入提取，但接口调用暂时失败。请稍后重试。",
@@ -229,12 +268,12 @@
 | 202 | 变异打分      | PlantCAD2 |
 | 203 | 掩码预测      | PlantCAD2 |
 | 204 | ACR预测-拟南芥 | PlantCAD2 |
-| 205 | ACR预测-水稻  | PlantCAD2 |
-| 206 | ACR预测-大豆  | PlantCAD2 |
+| 205 | ACR预测-九物种 | PlantCAD2 |
+| 206 | ACR预测-细胞类型 | PlantCAD2 |
 | 207 | 表达量预测-开/关 | PlantCAD2 |
 | 208 | 表达量预测-绝对值 | PlantCAD2 |
-| 209 | 翻译效率预测-玉米 | PlantCAD2 |
-| 210 | 翻译效率预测-水稻 | PlantCAD2 |
+| 209 | 翻译效率预测-开/关 | PlantCAD2 |
+| 210 | 翻译效率预测-绝对值 | PlantCAD2 |
 
 ---
 
@@ -268,24 +307,53 @@
 }
 ```
 
-### 5.2 PlantCAD2 基础功能（task_id=201~203）
+### 5.2 PlantCAD2 统一 /report 接口（task_id=201~210）
 
-下游服务地址：环境变量 `PLANTCAD2_BASE_URL`，默认 http://localhost:8005
+PlantCAD2 所有任务统一使用 **POST /report** 端点，通过 `type` 字段区分推理类型。
 
-#### 201 - 嵌入提取
+下游服务地址：环境变量 `PLANTCAD2_BASE_URL`，默认 `http://localhost:8005`
 
-| 端点            | 请求方法 |
+#### 通用请求结构
+
+```json
+{
+  "type": "embedding | variant_score | masked_predict | predict",
+  "sequence": "DNA序列（IUPAC碱基），自动进行 U→T 转换兼容 mRNA",
+  // 不同 type 附加不同参数...
+}
+```
+
+#### 通用响应结构
+
+```json
+{
+  "type": "embedding | variant_score | masked_predict | predict",
+  "result": { ... },          // 推理数据（与旧接口一致）
+  "markdown": "# 模型推理报告..."  // Markdown 格式报告，前端可直接渲染
+}
+```
+
+> **注意**：
+> - 所有位置参数使用 **1-based** 索引，与用户习惯一致，无需转换
+> - 序列中的 `U`（尿嘧啶，mRNA 特征碱基）会自动转换为 `T`（胸腺嘧啶），兼容 mRNA 输入
+> - 响应中的 `markdown` 字段会透传到本服务响应的顶级 `markdown` 字段
+
+---
+
+#### 201 - 嵌入提取（type=embedding）
+
+| type 值       | 请求方法 |
 | ------------- | ---- |
-| `/embeddings` | POST |
+| `embedding`   | POST |
 
-**请求参数**：
+**附加请求参数**：
 
-| 参数        | 类型        | 说明                      |
-| --------- | --------- | ----------------------- |
-| sequence  | string    | DNA 序列（IUPAC，最长 8192bp） |
-| normalize | bool (可选) | 是否归一化                   |
+| 参数        | 类型      | 说明                      |
+| --------- | -------- | ----------------------- |
+| sequence  | string   | DNA 序列（IUPAC，最长 8192bp） |
+| normalize | bool(可选)| 是否归一化（默认 true）          |
 
-**结果结构**：
+**结果结构**（内层 `result`）：
 
 ```json
 {
@@ -294,22 +362,24 @@
 }
 ```
 
-#### 202 - 变异打分
+---
 
-| 端点               | 请求方法 |
-| ---------------- | ---- |
-| `/variant-score` | POST |
+#### 202 - 变异打分（type=variant_score）
 
-**请求参数**：
+| type 值           | 请求方法 |
+| ----------------- | ---- |
+| `variant_score`   | POST |
 
-| 参数          | 类型       | 说明                              |
-| ----------- | -------- | ------------------------------- |
-| sequence    | string   | DNA 序列                          |
-| position    | int      | 变异位置（自动将用户 1-based 转换为 0-based） |
-| ref_allele  | string   | 参考碱基（A/C/G/T）                   |
-| alt_alleles | string[] | 变异碱基列表                          |
+**附加请求参数**：
 
-**结果结构**：
+| 参数          | 类型       | 说明                          |
+| ----------- | -------- | --------------------------- |
+| sequence    | string   | DNA 序列                      |
+| position    | int      | 变异位置（**1-based**，与用户输入一致） |
+| ref_allele  | string   | 参考碱基（A/C/G/T）               |
+| alt_alleles | string[] | 变异碱基列表                      |
+
+**结果结构**（内层 `result`）：
 
 ```json
 {
@@ -317,55 +387,58 @@
 }
 ```
 
-#### 203 - 掩码预测
+---
 
-| 端点                | 请求方法 |
+#### 203 - 掩码预测（type=masked_predict）
+
+| type 值           | 请求方法 |
 | ----------------- | ---- |
-| `/masked-predict` | POST |
+| `masked_predict`  | POST |
 
-**请求参数**：
+**附加请求参数**：
 
-| 参数        | 类型     | 说明                                |
-| --------- | ------ | --------------------------------- |
-| sequence  | string | DNA 序列                            |
-| positions | int[]  | 预测位置列表（自动将用户 1-based 转换为 0-based） |
+| 参数        | 类型     | 说明                          |
+| --------- | ------ | --------------------------- |
+| sequence  | string | DNA 序列                      |
+| positions | int[]  | 预测位置列表（**1-based**，与用户输入一致） |
 
-**结果结构**：
+**结果结构**（内层 `result`）：
 
 ```json
 {
   "predictions": {
-    "0": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
-    "5": {"A": 0.80, "C": 0.05, "G": 0.10, "T": 0.05}
+    "1": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
+    "3": {"A": 0.80, "C": 0.05, "G": 0.10, "T": 0.05}
   }
 }
 ```
 
-### 5.3 PlantCAD2 LoRA 功能预测（task_id=204~210）
+---
 
-所有 LoRA 任务共用 `/predict` 端点，通过 `task` 参数区分：
+#### 204~210 - LoRA 任务预测（type=predict）
 
-| task_id | 端点         | task 参数值               | 预测类型           |
-| ------- | ---------- | ---------------------- | -------------- |
-| 204     | `/predict` | `acr_arabidopsis`      | 二分类            |
-| 205     | `/predict` | `acr_nine_species`     | 二分类            |
-| 206     | `/predict` | `acr_cell_type`        | 多标签分类（92种细胞类型） |
-| 207     | `/predict` | `expression_on_off`    | 二分类            |
-| 208     | `/predict` | `expression_absolute`  | 回归             |
-| 209     | `/predict` | `translation_on_off`   | 二分类            |
-| 210     | `/predict` | `translation_absolute` | 回归             |
+所有 LoRA 任务共用 `type=predict`，通过 `task` 参数区分具体任务：
 
-**请求参数**：
+| task_id | type 值     | task 参数值               | 预测类型         |
+| ------- | ---------- | ---------------------- | ------------ |
+| 204     | `predict`  | `acr_arabidopsis`      | 二分类          |
+| 205     | `predict`  | `acr_nine_species`     | 二分类          |
+| 206     | `predict`  | `acr_cell_type`        | 多标签分类（92种细胞类型） |
+| 207     | `predict`  | `expression_on_off`    | 二分类          |
+| 208     | `predict`  | `expression_absolute`  | 回归           |
+| 209     | `predict`  | `translation_on_off`   | 二分类          |
+| 210     | `predict`  | `translation_absolute` | 回归           |
+
+**附加请求参数**：
 
 | 参数       | 类型     | 说明                      |
 | -------- | ------ | ----------------------- |
 | sequence | string | DNA 序列                  |
-| task     | string | LoRA 任务标识（由本服务自动填充，见上表） |
+| task     | string | LoRA 任务标识（由本服务自动填充） |
 
-**结果结构**：
+**结果结构**（内层 `result`）：
 
 - **二分类任务（204/205/207/209）**：
-  
   ```json
   {
     "prediction": "active/inactive",
@@ -374,19 +447,27 @@
   ```
 
 - **多标签分类任务（206）**：
-  
   ```json
   {
-    "prediction": ["细胞类型A", "细胞类型B", ...],
     "num_labels": 92,
     "probabilities": [0.1, 0.05, ...]
   }
   ```
 
 - **回归任务（208/210）**：
-  
   ```json
   {
     "prediction": 3.45
   }
   ```
+
+---
+
+### 5.3 U→T 转换说明
+
+由于 PlantCAD2 的 DNA 模型使用 IUPAC 核苷酸编码（A/C/G/T/N/R/Y/M/K/S/W/H/B/V/D），不包含 `U`（尿嘧啶），本服务在以下两处自动进行 U→T 转换：
+
+1. **参数提取层**（中置信度/低置信度路径）：在 `param_extractor.py` 的 `validate_params` 中，对用户输入的序列做 `replace('U', 'T')`
+2. **接口调用层**（高置信度路径）：在 `api_caller.py` 的 `build_request_body` 中，对发送到 PlantCAD2 的序列做 `replace('U', 'T')`
+
+> 从生物学角度：mRNA 中的 U（尿嘧啶）在 DNA 序列中对应 T（胸腺嘧啶），这一转换是标准的 RNA→DNA 预处理，不影响模型推理的生物学意义。对于翻译效率预测（209/210）等涉及 mRNA 序列的任务，此转换确保兼容性。
