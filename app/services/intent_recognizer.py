@@ -17,6 +17,7 @@ from app.prompts.task_prompts import TASK_DETAILS, TASK_NAME_MAP, TASK_MODEL_MAP
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
     base_url=settings.llm_base_url,
+    max_retries=0,  # 禁止自动重试，超时后立即降级
 )
 
 

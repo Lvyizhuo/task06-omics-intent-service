@@ -31,7 +31,7 @@ class Settings:
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8010")))
 
     # 超时配置
-    llm_timeout: float = 30.0
+    llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
     api_timeout: float = 60.0
     alphafold3_timeout: float = 600.0  # AlphaFold3 结构预测耗时较长（2-10分钟）
     max_retries: int = 3
