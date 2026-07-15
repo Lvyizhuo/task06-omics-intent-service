@@ -16,7 +16,7 @@
 ```
 用户 → 第一次意图识别（路由到组学智能体） → 组学意图识别[本服务 :8010] →
                                          → PlantCAD2 推理服务 :8005（统一 /report 接口）
-                                         → EVO2 转发接口 :8666
+                                         → EVO2 转发接口 :8666 → AlphaFold3 结构预测 :8015（EVO2 管道）
 ```
 
 ### 调用流程说明
@@ -36,6 +36,11 @@
 2. 检查参数完整性（是否包含 `sequence` 或 `prompt`）
 3. 调用对应的下游接口（PlantCAD2 或 EVO2）
 4. 返回下游服务的计算结果
+
+**EVO2 管道（task_id=101）特殊说明**：
+- EVO2 任务会自动执行 **序列生成 → AlphaFold3 结构预测** 两级管道
+- 先生成 DNA 后续序列，再将生成的序列自动传入 AlphaFold3 进行三维结构预测
+- AlphaFold3 结构预测失败不影响 EVO2 序列生成结果，仅标记 `alphafold3_error` 字段
 
 **若下游调用失败**，自动降级为 **medium** 置信度，返回错误信息和推荐任务。
 
@@ -70,8 +75,8 @@
 | task_name       | string | 任务名称（high时返回）                 |
 | model           | string | 使用的模型（high时返回）                |
 | params          | object | 提取的参数（high/medium/low时返回，包含所有可能的参数字段，未提取到的为null） |
-| result          | object | 计算结果（high时返回，PlantCAD2任务含内层result和markdown） |
-| markdown        | string | PlantCAD2自动生成的Markdown推理报告（high时返回，前端可直接渲染；EVO2任务为null） |
+| result          | object | 计算结果（high时返回，PlantCAD2任务含内层result和markdown；EVO2任务含evo2_result和alphafold3_result） |
+| markdown        | string | 自动生成的Markdown推理报告（high时返回，前端可直接渲染。PlantCAD2任务直接返回报告；EVO2任务返回AlphaFold3结构预测报告） |
 | suggested_tasks | array  | 推荐任务列表（medium时返回，每项含required_fields） |
 | available_tasks | array  | 全部任务列表（low时返回，每项含required_fields） |
 | guide_message   | string | 引导消息                          |
@@ -177,7 +182,7 @@
   "suggested_tasks": null,
   "guide_message": "您好！请选择您需要的任务，并提供DNA序列。",
   "available_tasks": [
-    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2", "required_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"]},
+    {"task_id": 101, "task_name": "基因序列预测生成（含结构预测）", "model": "EVO2 + AlphaFold3", "required_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"]},
     {"task_id": 201, "task_name": "嵌入提取", "model": "PlantCAD2", "required_fields": ["sequence", "normalize"]},
     {"task_id": 202, "task_name": "变异打分", "model": "PlantCAD2", "required_fields": ["sequence", "position", "ref_allele", "alt_alleles"]},
     {"task_id": 203, "task_name": "掩码预测", "model": "PlantCAD2", "required_fields": ["sequence", "positions"]},
@@ -252,28 +257,30 @@
 | ---- | --------- | ------------------------ |
 | 1001 | LLM服务调用失败 | Qwen3 模型不可用或超时           |
 | 1002 | 参数提取失败    | LLM 未能从用户输入中提取到有效参数      |
-| 1003 | 下游接口调用失败  | PlantCAD2/EVO2 接口返回错误或超时 |
+| 1003 | 下游接口调用失败  | PlantCAD2/EVO2/AlphaFold3 接口返回错误或超时 |
 | 1004 | 参数验证失败    | 参数格式不合法（如下游接口返回 400）     |
 
-> **注意**：1003 和 1004 错误出现在 high 降级的 medium 置信度响应中，此时 `confidence` 为 `medium`，同时携带 `suggested_tasks` 和 `error` 字段。
+> **注意**：
+> - 1003 和 1004 错误出现在 high 降级的 medium 置信度响应中，此时 `confidence` 为 `medium`，同时携带 `suggested_tasks` 和 `error` 字段。
+> - EVO2 管道中，AlphaFold3 结构预测失败**不会**触发降级（1003），仅返回 `alphafold3_error` 字段，EVO2 序列生成结果正常返回。
 
 ---
 
 ## 4. 任务ID对照表
 
-| ID  | 任务名称      | 模型        |
-| --- | --------- | --------- |
-| 101 | 基因序列预测生成  | EVO2      |
-| 201 | 嵌入提取      | PlantCAD2 |
-| 202 | 变异打分      | PlantCAD2 |
-| 203 | 掩码预测      | PlantCAD2 |
-| 204 | ACR预测-拟南芥 | PlantCAD2 |
-| 205 | ACR预测-九物种 | PlantCAD2 |
-| 206 | ACR预测-细胞类型 | PlantCAD2 |
-| 207 | 表达量预测-开/关 | PlantCAD2 |
-| 208 | 表达量预测-绝对值 | PlantCAD2 |
-| 209 | 翻译效率预测-开/关 | PlantCAD2 |
-| 210 | 翻译效率预测-绝对值 | PlantCAD2 |
+| ID  | 任务名称              | 模型                    |
+| --- | ----------------- | ----------------------- |
+| 101 | 基因序列预测生成（含结构预测） | EVO2 + AlphaFold3（管道） |
+| 201 | 嵌入提取              | PlantCAD2              |
+| 202 | 变异打分              | PlantCAD2              |
+| 203 | 掩码预测              | PlantCAD2              |
+| 204 | ACR预测-拟南芥         | PlantCAD2              |
+| 205 | ACR预测-九物种         | PlantCAD2              |
+| 206 | ACR预测-细胞类型        | PlantCAD2              |
+| 207 | 表达量预测-开/关         | PlantCAD2              |
+| 208 | 表达量预测-绝对值         | PlantCAD2              |
+| 209 | 翻译效率预测-开/关        | PlantCAD2              |
+| 210 | 翻译效率预测-绝对值        | PlantCAD2              |
 
 ---
 
@@ -281,12 +288,18 @@
 
 > **说明**：高置信度场景下，本服务会自动将请求转发到下游推理服务的对应接口。以下是各任务 ID 对应的下游接口详情。
 
-### 5.1 EVO2 接口（task_id=101）
+### 5.1 EVO2 → AlphaFold3 管道（task_id=101）
 
-| 项目   | 值                                                        |
-| ---- | -------------------------------------------------------- |
-| 下游地址 | `POST {EVO2_BASE_URL}/api/v1/generate`                   |
-| 下游服务 | EVO2（环境变量 `EVO2_BASE_URL`，默认 http://36.137.205.153:8666） |
+**管道流程**：本服务自动将 EVO2 序列生成与 AlphaFold3 结构预测串联为两级管道。
+
+| 阶段 | 服务 | 接口 |
+|------|------|------|
+| Step 1: 序列生成 | EVO2（环境变量 `EVO2_BASE_URL`，默认 http://36.137.205.153:8666） | `POST /api/v1/generate` |
+| Step 2: 结构预测 | AlphaFold3（环境变量 `ALPHAFOLD3_BASE_URL`，默认 http://localhost:8015） | `POST /api/v1/report` |
+
+#### Step 1：EVO2 序列生成
+
+**下游地址**：`POST {EVO2_BASE_URL}/api/v1/generate`
 
 **请求参数映射**（本服务参数 → 下游接口参数）：
 
@@ -299,13 +312,75 @@
 | topP        | string | "0.6" | Top-P 采样参数                                       |
 | showLogits  | string | "0"   | 是否返回 logits                                      |
 
-**结果结构**：
+**EVO2 响应格式**：
+```json
+{
+  "result": {
+    "sequences": "ATCG...（生成的完整序列）"
+  },
+  "res_code": "0",
+  "res_desc": "success"
+}
+```
+
+#### Step 2：AlphaFold3 结构预测
+
+Step 1 生成的序列会自动传入 AlphaFold3 的 `/api/v1/report` 接口进行结构预测。
+
+**下游地址**：`POST {ALPHAFOLD3_BASE_URL}/api/v1/report`
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| sequence | string | EVO2 生成的 DNA 序列（自动传入） |
+| name | string | 自动生成的任务名称 |
+| modelSeeds | int[] | `[42]` |
+
+**AlphaFold3 响应格式**：
+```json
+{
+  "type": "alphafold3_predict",
+  "result": {
+    "id": "uuid",
+    "status": "completed",
+    "best_ptm": 0.8546,
+    "best_iptm": 0.7123,
+    "ranking_score": 0.8921,
+    "predictions": [...]
+  },
+  "markdown": "# AlphaFold3 模型推理报告..."
+}
+```
+
+> **注意**：AlphaFold3 结构预测耗时较长（2-10 分钟），超时时间设置为 600 秒（环境变量 `ALPHAFOLD3_TIMEOUT`）。若 AlphaFold3 调用失败，仅返回 EVO2 生成结果并在响应中携带 `alphafold3_error` 字段，不影响主流程。
+
+#### 合并后结果结构
+
+EVO2 管道调用完成后，返回的 `result` 字段结构如下：
 
 ```json
 {
-  "generated_sequence": "ATCG...（后续生成的完整序列）"
+  "evo2_result": {
+    "result": {"sequences": "ATCG..."},
+    "res_code": "0"
+  },
+  "generated_sequence": "ATCG...（生成的完整序列）",
+  "alphafold3_result": {
+    "type": "alphafold3_predict",
+    "result": {"status": "completed", "best_ptm": 0.85, ...},
+    "markdown": "# AlphaFold3..."
+  },
+  "alphafold3_error": null
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| evo2_result | object | EVO2 原始响应 |
+| generated_sequence | string | EVO2 生成的 DNA 序列（顶层兼容字段） |
+| alphafold3_result | object\|null | AlphaFold3 响应（含 markdown 报告），失败时为 null |
+| alphafold3_error | string\|null | AlphaFold3 错误信息（如有） |
 
 ### 5.2 PlantCAD2 统一 /report 接口（task_id=201~210）
 

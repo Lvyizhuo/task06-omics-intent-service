@@ -1,8 +1,8 @@
 # 组学智能体意图识别 PRD 文档
 
-> **文档版本**：v1.0
+> **文档版本**：v1.2
 > **创建日期**：2026-06-22
-> **最后更新**：2026-06-22
+> **最后更新**：2026-07-15
 > **负责人**：lvyizhuo
 
 ---
@@ -13,10 +13,9 @@
 
 "农业大模型"项目包含多个智能体模块，其中"组学智能体"负责基因序列相关的预测和分析任务。组学智能体目前包含两个已部署的模型：
 
-- **EVO2**：基因序列预测生成模型
+- **EVO2**：基因序列预测生成模型（已集成 AlphaFold3 自动结构预测管道）
 - **PlantCAD2**：植物基因组DNA语言模型（694M参数），支持嵌入提取、变异打分、掩码预测、LoRA功能预测等10个接口
-
-（AlphaFold3 暂未接入）
+- **AlphaFold3**：生物分子结构预测模型（自动接收 EVO2 生成序列进行三维结构预测）
 
 ### 1.2 问题描述
 
@@ -37,7 +36,7 @@
     ↓
 返回具体任务对应的接口序号
     ↓
-前端调用对应的任务接口（PlantCAD2:8005 / EVO2转发接口）
+前端调用对应的任务接口（PlantCAD2:8005 / EVO2转发接口 → AlphaFold3结构预测:8015）
 ```
 
 ---
@@ -136,9 +135,9 @@
     {
       "task_id": 101,
       "task_name": "基因序列预测生成",
-      "model": "EVO2",
-      "description": "给定一段基因序列，预测并生成后续序列",
-      "guide_message": "请提供起始DNA序列，我将为您预测生成后续序列"
+      "model": "EVO2 + AlphaFold3",
+      "description": "给定一段基因序列，预测并生成后续序列，并自动进行AlphaFold3结构预测",
+      "guide_message": "请提供起始DNA序列，我将为您预测生成后续序列，并对生成结果自动进行AlphaFold3结构预测"
     }
   ],
   "guide_message": "您想进行哪种基因序列分析？请提供DNA序列数据"
@@ -175,7 +174,7 @@
     {"task_id": 208, "task_name": "表达量预测-绝对值", "model": "PlantCAD2"},
     {"task_id": 209, "task_name": "翻译效率预测-开/关", "model": "PlantCAD2"},
     {"task_id": 210, "task_name": "翻译效率预测-绝对值", "model": "PlantCAD2"},
-    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2"}
+    {"task_id": 101, "task_name": "基因序列预测生成", "model": "EVO2 + AlphaFold3"}
   ]
 }
 ```
@@ -191,16 +190,19 @@
 
 ### 3.2 任务列表
 
-| 任务ID | 任务名称       | 模型        | 接口路径                  | 请求参数                                                   | 输出类型       |
-| ---- | ---------- | --------- | --------------------- | ------------------------------------------------------ | ---------- |
-| 101  | 基因序列预测生成   | EVO2      | POST /api/v1/generate | prompt, numTokens, temperature, topK, topP, showLogits | 序列+置信度     |
-| 201  | 嵌入提取       | PlantCAD2 | POST /embeddings      | sequence, normalize                                    | 向量矩阵       |
-| 202  | 变异打分       | PlantCAD2 | POST /variant-score   | sequence, position, ref_allele, alt_alleles            | LLR分数      |
-| 203  | 掩码预测       | PlantCAD2 | POST /masked-predict  | sequence, positions                                    | 碱基概率分布     |
-| 204  | ACR预测-拟南芥  | PlantCAD2 | POST /predict         | sequence, task="acr_arabidopsis"                       | 二分类        |
-| 205  | ACR预测-九物种  | PlantCAD2 | POST /predict         | sequence, task="acr_nine_species"                      | 二分类        |
-| 206  | ACR预测-细胞类型 | PlantCAD2 | POST /predict         | sequence, task="acr_cell_type"                         | 多标签分类(92类) |
-| 207  | 表达量预测-开/关  | PlantCAD2 | POST /predict         | sequence, task="expression_on_off"                     | 二分类        |
+| 任务ID | 任务名称             | 模型                    | 接口路径                                   | 请求参数                                                   | 输出类型          |
+| ---- | ---------------- | ----------------------- | -------------------------------------- | ------------------------------------------------------ | ------------- |
+| 101  | 基因序列预测生成（含结构预测） | EVO2 → AlphaFold3（管道） | POST /api/v1/generate → POST /api/v1/report | prompt, numTokens, temperature, topK, topP, showLogits | 序列+置信度+结构预测 |
+| 201  | 嵌入提取             | PlantCAD2               | POST /embeddings                       | sequence, normalize                                    | 向量矩阵          |
+| 202  | 变异打分             | PlantCAD2               | POST /variant-score                    | sequence, position, ref_allele, alt_alleles            | LLR分数         |
+| 203  | 掩码预测             | PlantCAD2               | POST /masked-predict                   | sequence, positions                                    | 碱基概率分布        |
+| 204  | ACR预测-拟南芥        | PlantCAD2               | POST /predict                          | sequence, task="acr_arabidopsis"                       | 二分类           |
+| 205  | ACR预测-九物种        | PlantCAD2               | POST /predict                          | sequence, task="acr_nine_species"                      | 二分类           |
+| 206  | ACR预测-细胞类型       | PlantCAD2               | POST /predict                          | sequence, task="acr_cell_type"                         | 多标签分类(92类)    |
+| 207  | 表达量预测-开/关        | PlantCAD2               | POST /predict                          | sequence, task="expression_on_off"                     | 二分类           |
+| 208  | 表达量预测-绝对值        | PlantCAD2               | POST /predict                          | sequence, task="expression_absolute"                   | 回归            |
+| 209  | 翻译效率预测-开/关       | PlantCAD2               | POST /predict                          | sequence, task="translation_on_off"                    | 二分类           |
+| 210  | 翻译效率预测-绝对值       | PlantCAD2               | POST /predict                          | sequence, task="translation_absolute"                  | 回归            |
 | 208  | 表达量预测-绝对值  | PlantCAD2 | POST /predict         | sequence, task="expression_absolute"                   | 回归         |
 | 209  | 翻译效率预测-开/关 | PlantCAD2 | POST /predict         | sequence, task="translation_on_off"                    | 二分类        |
 | 210  | 翻译效率预测-绝对值 | PlantCAD2 | POST /predict         | sequence, task="translation_absolute"                  | 回归         |
@@ -265,7 +267,7 @@
 
 | 任务ID | 任务名称 | 模型 | 核心职责 | 输入要求 |
 |--------|---------|------|----------|----------|
-| 101 | 基因序列预测生成 | EVO2 | 给定一段基因序列，预测并生成后续序列 | prompt（DNA序列） |
+| 101 | 基因序列预测生成 | EVO2 + AlphaFold3（管道） | 给定一段基因序列，预测生成后续序列，并自动对生成结果进行AlphaFold3结构预测 | prompt（DNA序列） |
 | 201 | 嵌入提取 | PlantCAD2 | 提取DNA序列每个位置的1536维向量表示 | sequence（DNA序列） |
 | 202 | 变异打分 | PlantCAD2 | 评估单核苷酸变异的致病性 | sequence, position, ref_allele, alt_alleles |
 | 203 | 掩码预测 | PlantCAD2 | 预测指定位置各碱基的概率分布 | sequence, positions |
@@ -343,6 +345,7 @@
 
 - 生成序列、预测序列、续写、序列生成、基因生成、DNA生成
 - 后续序列、延伸、扩展序列
+- 结构预测、AlphaFold3、蛋白结构（与序列生成同时触发）
 
 **典型用户问题场景**：
 
@@ -355,6 +358,8 @@
 6. "帮我延伸这段DNA序列到500bp"
 7. "这段序列后面会是什么碱基？"
 8. "用EVO2预测一下"
+9. "帮我预测这个序列的结构"
+10. "生成序列并进行结构预测"
 ```
 
 **数据提取规则**：
@@ -364,6 +369,8 @@
 - 提取temperature字段：温度系数（默认0.1）
 - 提取topK字段：候选词数量（默认4）
 - 提取topP字段：累积概率（默认0.5）
+
+> **注意**：EVO2 完成任务后会**自动**将生成的序列传入 AlphaFold3 进行三维结构预测。结构预测结果通过响应中的 `alphafold3_result` 字段和顶层 `markdown` 字段返回。结构预测失败不影响序列生成结果。
 
 ---
 
@@ -562,7 +569,8 @@
 │                              ↓                    ↓         │
 │                    ┌─────────────────────────────────────┐  │
 │                    │         接口调用层                    │  │
-│                    │  PlantCAD2 (8005)  EVO2 (转发接口)    │  │
+│                    │  PlantCAD2 (8005)                    │
+│  │  EVO2 (8666) → AlphaFold3 (8015) │  │
 │                    └─────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -618,11 +626,12 @@ async def recognize_intent(user_input: str) -> dict:
 
 ### 6.4 下游服务地址
 
-| 服务             | 地址                                         | 端口   |
-| -------------- | ------------------------------------------ | ---- |
-| PlantCAD2 推理服务 | http://localhost:8005                      | 8005 |
-| EVO2 转发接口      | http://36.137.205.153:8666/api/v1/generate | 8666 |
-| 组学意图识别服务       | http://localhost:8010                      | 8010 |
+| 服务                 | 地址                                         | 端口   |
+| ------------------ | ------------------------------------------ | ---- |
+| PlantCAD2 推理服务     | http://localhost:8005                      | 8005 |
+| EVO2 转发接口          | http://36.137.205.153:8666/api/v1/generate | 8666 |
+| AlphaFold3 结构预测服务 | http://localhost:8015                      | 8015 |
+| 组学意图识别服务           | http://localhost:8010                      | 8010 |
 
 ### 6.5 PlantCAD2 接口调用详细设计
 
@@ -1191,7 +1200,7 @@ omics-intent-service/
 | ---- | -------------- | ---------- |
 | v1.0 | 基础意图识别+三种置信度场景 | 2026-06-25 |
 | v1.1 | 多轮对话支持+上下文记忆   | 2026-07-01 |
-| v1.2 | AlphaFold3接入   | 待定         |
+| v1.2 | AlphaFold3接入（EVO2管道自动结构预测） | 2026-07-14 |
 
 ### 11.2 优化方向
 
@@ -1218,6 +1227,10 @@ omics-intent-service/
 
 - [PlantCAD2 API文档](./api-reference.md)
 - [PlantCAD2接口文档](./api-接口文档.md)
+- [PlantCAD2推理报告接口文档](./【组学智能体】PlantCAD2-api-report-接口文档.md)
 - [EVO2推理接口文档](./EVO2推理——接口文档.docx)
 - [EVO2转发接口文档](./EVO2转发接口接口文档.xlsx)
+- [AlphaFold3 API接口文档](./【组学智能体】AlphaFold3-api-接口文档.md)
+- [AlphaFold3推理报告接口文档](./【组学智能体】AlphaFold3-api-report-接口文档.md)
+- [AlphaFold3产品需求文档](./【组学智能体】AlphaFold3-api-prd需求文档.md)
 - [主智能体意图识别实现](../task06-ytModule/intent_recognizer.py)
