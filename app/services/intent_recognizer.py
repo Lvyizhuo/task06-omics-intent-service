@@ -59,9 +59,14 @@ async def recognize_intent(user_input: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"意图识别异常: {str(e)}")
+        # 异常降级时仍然附带可用任务列表，避免前端空数据
         return {
             "confidence": "low",
             "guide_message": "抱歉，意图识别服务暂时出现问题，请稍后重试。您可以直接选择需要的任务。",
+            "available_tasks": [
+                {"task_id": tid, "task_name": details["name"], "model": details["model"], "required_fields": details.get("data_fields", [])}
+                for tid, details in TASK_DETAILS.items()
+            ],
             "error": str(e),
         }
 
