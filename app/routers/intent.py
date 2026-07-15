@@ -209,8 +209,16 @@ async def handle_high_confidence(intent_result: dict) -> IntentResponse:
         if task_id == 101:
             evo2_tip = " 当前结果基于默认参数计算（numTokens=200, temperature=0.6, topK=4, topP=0.6, showLogits=0），如需自定义参数，请手动选择EVO2任务并指定参数。"
 
-        # 提取下游接口返回的 markdown 报告（EVO2 无此字段，自然返回 None）
-        markdown_report = result.get("markdown")
+        # 提取 Markdown 报告（PlantCAD2 或 AlphaFold3 均可提供）
+        markdown_report = None
+        if task_id == 101:
+            # EVO2 管道：从 AlphaFold3 结果中提取 Markdown 报告
+            af3_result = result.get("alphafold3_result")
+            if af3_result:
+                markdown_report = af3_result.get("markdown")
+        else:
+            # PlantCAD2 直接返回 Markdown 报告
+            markdown_report = result.get("markdown")
 
         # 填充完整的字段结构
         full_params = fill_all_params(params)

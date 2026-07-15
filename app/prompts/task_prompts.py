@@ -35,9 +35,9 @@ TASK_DETAILS = {
     101: {
         "name": "基因序列预测生成",
         "model": "EVO2",
-        "description": "给定一段基因序列，预测并生成后续序列",
-        "guide_message": "请提供起始DNA序列，我将为您预测生成后续序列",
-        "keywords": ["生成", "预测序列", "续写", "序列生成", "基因生成", "DNA生成", "后续序列", "延伸", "扩展序列"],
+        "description": "给定一段基因序列，预测并生成后续序列，并自动对生成结果进行AlphaFold3结构预测",
+        "guide_message": "请提供起始DNA序列，我将为您预测生成后续序列，并对生成结果自动进行AlphaFold3结构预测",
+        "keywords": ["生成", "预测序列", "续写", "序列生成", "基因生成", "DNA生成", "后续序列", "延伸", "扩展序列", "结构预测", "AlphaFold3", "蛋白结构"],
         "data_fields": ["prompt", "numTokens", "temperature", "topK", "topP", "showLogits"],
     },
     201: {

@@ -1,0 +1,96 @@
+1、构建推理镜像
+
+2、项目结构（服务器）
+2.1 模型权重/数据库（只读）：/data2/ntt/lvyizhuo/alphafold3
+2.2 推理服务代码：/data1t/ntt/lvyizhuo/task06-alphafold3-agent
+
+3、alphafold3官方测试命令（单次任务）
+docker run --gpus '"device=1"' \
+    -v /data1t/ntt/lvyizhuo/alphafold3/weights:/root/models \
+    -v /data1t/ntt/lvyizhuo/alphafold3/databases:/root/public_databases \
+    -v /data2/ntt/lvyizhuo/task06-alphafold3-agent/input:/root/input \
+    -v /data2/ntt/lvyizhuo/task06-alphafold3-agent/output:/root/output \
+    alphafold3 \
+    uv run python3 run_alphafold.py \
+        --json_path=/root/input/test.json \
+        --model_dir=/root/models \
+        --output_dir=/root/output
+
+
+
+3、服务启动（docker compose 方式，推荐）：
+# 在项目目录下执行
+docker compose up -d
+
+# 或使用原始 docker run 方式：
+docker run -d \
+    --gpus '"device=1"' \
+    --name alphafold3-api \
+    --restart unless-stopped \
+    -p 8015:8015 \
+    -v /data1t/ntt/lvyizhuo/alphafold3/weights:/root/models:ro \
+    -v /data1t/ntt/lvyizhuo/alphafold3/databases:/root/public_databases:ro \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/storage:/app/storage \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/data:/app/data \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/logs:/app/logs \
+    alphafold3-api
+
+4、CPU启动服务
+docker run -d \
+    --name alphafold3-api \
+    --restart unless-stopped \
+    -p 8015:8015 \
+    -v /data1t/ntt/lvyizhuo/alphafold3/weights:/root/models:ro \
+    -v /data1t/ntt/lvyizhuo/alphafold3/databases:/root/public_databases:ro \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/storage:/app/storage \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/data:/app/data \
+    -v /data1t/ntt/lvyizhuo/task06-alphafold3-agent/logs:/app/logs \
+    alphafold3-api
+
+# 或使用 docker compose 方式（移除 deploy.resources.reservations 部分）
+
+4、推理服务接口
+端口：8015
+数据库端口：
+
+
+/data2/ntt/lvyizhuo/task06-alphafold3-agent/input/test.json
+
+
+
+curl -X POST http://localhost:8015/api/v1/predict/dna \
+    -H "Content-Type: application/json" \
+    -d '{"sequence": "AAATGATGAATAAATTTTTTTATAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT", "name": "evo2_dna_test"}'
+
+curl -X POST http://localhost:8015/api/v1/predict/dna -H "Content-Type: application/json" -d '{"sequence": "AATAGTAGGAACTTCTTTAAGTTTATTAATTCGAGCTGAATTAGGTCATCCTGGAGCATTAATTGGAGATGATCAAATTTATAATGTAATTGTTACAGCTCATGCTTTTATTATAATTTTTTTTATAGTTATACCAATTATAATTGGAGGATTTGGAAATTGATTAGTTCCTTTAATATTAGGAGCTCCTGATATAGCTT", "name": "evo2_dna_test"}'
+
+
+
+curl -X POST http://localhost:8015/api/v1/predict/dna/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sequence": "AATAGTAGGAACTTCTTTAAGTTTATTAATTCGAGCTGAATTAGGTCATCCTGGAGCATTAATTGGAGATGATCAAATTTATAATGTAATTGTTACAGCTCATGCTTTTATTATAATTTTTTTTATAGTTATACCAATTATAATTGGAGGATTTGGAAATTGATTAGTTCCTTTAATATTAGGAGCTCCTGATATAGCTT",
+    "name": "test_dna_sync"
+  }'
+
+
+curl -X POST http://localhost:8015/api/v1/predict/dna/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sequence": "AAATGATGAATAAATTTTTTTATAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+    "name": "EVO2-DNA预测"
+  }'
+
+
+# 统一报告接口测试（返回 Markdown 报告）
+curl -X POST http://localhost:8015/api/v1/report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sequence": "AATAGTAGGAACTTCTTTAAGTTTATTAATTCGAGCTGAATTAGGTCATCCTGGAGCATTAATTGGAGATGATCAAATTTATAATGTAATTGTTACAGCTCATGCTTTTATTATAATTTTTTTTATAGTTATACCAATTATAATTGGAGGATTTGGAAATTGATTAGTTCCTTTAATATTAGGAGCTCCTGATATAGCTT",
+    "name": "test_report"
+  }'
+
+
+AAATGATGAATAAATTTTTTTATAAAAAAAATTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+
+EVO2-DNA预测

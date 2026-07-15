@@ -1,0 +1,1270 @@
+# AlphaFold 3 推理服务 API 产品需求文档 (PRD)
+
+## 文档信息
+
+| 字段 | 内容 |
+|------|------|
+| 项目名称 | AlphaFold 3 推理服务 API |
+| 文档版本 | v7.0 |
+| 创建日期 | 2026-06-25 |
+| 最后更新 | 2026-07-14 |
+| 负责人 | lvyizhuo |
+| 所属项目 | 农业大模型智能体二期 - 组学智能体能力开发 |
+
+---
+
+## 1. 项目背景
+
+### 1.1 业务背景
+
+农业大模型智能体二期项目需要集成组学分析能力，其中蛋白质结构预测是核心功能之一。AlphaFold 3 是 Google DeepMind 开发的生物分子结构预测模型，能够预测蛋白质、RNA、DNA、配体及其复合物的三维结构。
+
+### 1.2 当前状态
+
+- AlphaFold 3 模型代码仓库已完成部署
+- 模型推理所需的数据库和权重文件已下载，路径：`/data1t/ntt/lvyizhuo/alphafold3/`（原 `/data2/ntt/...` 已迁移至 `/data1t/ntt/...`）
+- Docker 镜像已在服务器上构建完成
+- 模型已成功运行，验证通过
+- 模型仅支持通过命令行调用，输入为 JSON 文件，输出为多个结果文件
+
+### 1.3 问题与挑战
+
+- 模型仅提供命令行接口，无法直接被前端或智能体调用
+- 推理过程耗时较长（取决于序列长度），前端需要等待结果返回
+- 输出结果包含多个文件，需要结构化处理以便前端渲染
+- 需要历史结果存储以便后续查询和下载
+
+---
+
+## 2. 项目目标
+
+### 2.1 核心目标
+
+将 AlphaFold 3 模型的推理能力封装为标准 RESTful API 服务，支持：
+
+1. 前端界面上传单个 JSON 文件并同步获取预测结果
+2. DNA 序列结构预测（EVO2 输出专用，自动生成双链）
+3. 统一报告接口（返回原始结果 + 格式化 Markdown 报告，专为前端展示设计）
+4. 保存历史计算结果，支持查询、预览和下载
+5. 自动清理过期数据（30 天）
+
+### 2.2 项目范围
+
+**在范围内：**
+- 单文件上传同步推理接口
+- DNA 序列推理（EVO2 输出，自动生成双链）
+- 统一报告接口（原始结果 + Markdown 报告）
+- 历史结果查询和下载接口
+- 结果数据解析（置信度指标提取、Markdown 报告模板）
+- 自动数据清理
+
+**不在范围内：**
+- 批量上传功能（后续版本考虑）
+- 异步任务队列（后续版本考虑）
+- 前端界面开发
+- 用户认证系统
+- 分布式部署
+
+### 2.3 成功指标
+
+| 指标 | 目标值 |
+|------|--------|
+| API 响应时间（非推理） | < 500ms |
+| 推理任务成功率 | > 95% |
+| 系统可用性 | > 99% |
+
+---
+
+## 3. 用户角色与场景
+
+### 3.1 用户角色
+
+| 角色 | 描述 | 主要操作 |
+|------|------|----------|
+| 前端用户 | 通过 Web 界面使用服务 | 上传 JSON、查看任务状态、下载结果 |
+| 智能体 | 农业大模型智能体 | 程序化调用 API 进行结构预测 |
+
+### 3.2 核心用户场景
+
+#### 场景 1：提交预测任务并获取结果
+
+```
+用户 -> 前端界面 -> 上传单个 AlphaFold 3 格式的 JSON 文件
+                  -> 提交预测任务
+                  -> 等待推理完成（无超时限制）
+                  -> 获得完整的预测结果（置信度指标、结构文件链接等）
+```
+
+#### 场景 2：查看历史结果
+
+```
+用户 -> 前端界面 -> 从历史列表选择任务
+                  -> 查看置信度摘要（pTM、ipTM、ranking_score）
+                  -> 预览结构数据
+                  -> 下载 CIF 结构文件
+                  -> 下载完整结果包（ZIP）
+```
+
+#### 场景 3：智能体集成调用
+
+```
+智能体 -> 调用 POST /api/v1/predict 提交 JSON 文件
+        -> 等待推理完成，直接获得完整结果
+        -> 将结果整合到智能体工作流中
+```
+
+---
+
+## 4. 功能需求
+
+### 4.1 预测接口模块
+
+#### 4.1.1 提交预测任务（同步）
+
+**功能描述**：接收用户上传的单个 AlphaFold 3 输入 JSON 文件，同步执行推理并返回完整结果。客户端需等待推理完成，无超时限制。
+
+**接口**：`POST /api/v1/predict`
+
+**输入参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| file | File | 是 | AlphaFold 3 格式的 JSON 文件 |
+
+**输出**（推理成功时）：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "job_name": "test_protein",
+  "created_at": "2026-06-25T10:00:00Z",
+  "completed_at": "2026-06-25T10:05:30Z",
+  "duration_seconds": 330,
+  "input_summary": {
+    "name": "test_protein",
+    "sequences": [
+      {
+        "type": "protein",
+        "id": "A",
+        "length": 200
+      }
+    ],
+    "num_seeds": 1,
+    "num_samples": 5
+  },
+  "best_prediction": {
+    "seed": 42,
+    "sample": 0,
+    "ranking_score": 0.85,
+    "ptm": 0.75,
+    "iptm": 0.82,
+    "fraction_disordered": 0.05,
+    "has_clash": false,
+    "chain_ptm": [0.78],
+    "chain_iptm": [0.81],
+    "chain_pair_iptm": [[0.78]],
+    "chain_pair_pae_min": [[0.5]]
+  },
+  "all_predictions": [
+    {
+      "seed": 42,
+      "sample": 0,
+      "ranking_score": 0.85,
+      "ptm": 0.75,
+      "iptm": 0.82
+    },
+    {
+      "seed": 42,
+      "sample": 1,
+      "ranking_score": 0.82,
+      "ptm": 0.73,
+      "iptm": 0.80
+    }
+  ],
+  "files": {
+    "best_model_cif": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/model.cif",
+    "data_json": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/data.json",
+    "ranking_scores_csv": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/ranking_scores.csv",
+    "download_zip": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/download"
+  }
+}
+```
+
+**输出**（推理失败时）：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "failed",
+  "job_name": "test_protein",
+  "created_at": "2026-06-25T10:00:00Z",
+  "completed_at": "2026-06-25T10:01:00Z",
+  "duration_seconds": 60,
+  "error_message": "GPU out of memory: sequence too long"
+}
+```
+
+**业务规则**：
+- 每次只接收单个 JSON 文件
+- 验证输入 JSON 格式是否符合 AlphaFold 3 规范
+- 检查 JSON 中的 `dialect` 字段必须为 `alphafold3`
+- 检查 `sequences` 字段不为空
+- 单个 JSON 文件大小不超过 10MB
+- 推理过程中客户端阻塞等待，无超时限制
+- 如果已有推理任务在运行，新请求需等待前一个任务完成后才能开始（单卡阻塞模式）
+- 推理完成后，结果自动保存到数据库和文件系统
+
+#### 4.1.2 DNA 序列推理（EVO2 输出专用）
+
+**功能描述**：接收 EVO2 生成的 DNA 序列，自动生成反向互补链，构建双链 DNA 输入 JSON 并执行 AlphaFold 3 结构预测推理。
+
+**接口**：`POST /api/v1/predict/dna`
+
+**输入参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| sequence | string | 是 | DNA 正向链序列（5'→3'），仅包含 A/T/C/G，最大 10000 字符 |
+| name | string | 否 | 任务名称，不填则自动生成 |
+| modelSeeds | array[int] | 否 | 随机种子列表，默认 [42] |
+
+**处理流程**：
+1. 验证 DNA 序列（仅允许 A/T/C/G 碱基）
+2. 自动生成反向互补链（B 链）：A↔T, C↔G，然后反转
+3. 构建 AlphaFold 3 输入 JSON（包含 A 链 + B 链双链）
+4. 执行推理并返回结果
+
+**输出**：与 `POST /api/v1/predict` 相同的 TaskDetail 格式。
+
+**业务规则**：
+- DNA 序列仅允许 A/T/C/G 四种碱基
+- 互补链自动生成，无需手动提供
+- 双链预测可获得 ipTM 值（衡量链间界面质量）
+
+#### 4.1.3 DNA 序列推理（同步阻塞版）
+
+**功能描述**：与 `POST /api/v1/predict/dna` 功能完全相同，但采用同步阻塞模式。前端调用后直接等待推理完成，返回完整结果，无需轮询。
+
+**接口**：`POST /api/v1/predict/dna/sync`
+
+**输入参数**：与 `POST /api/v1/predict/dna` 完全相同。
+
+**输出**：推理完成后返回完整的 TaskDetail 对象，包含所有预测结果。
+
+**业务规则**：
+- 前端调用后阻塞等待，可能需要 2-10 分钟
+- 建议前端设置 15 分钟以上的超时时间
+- 如果前面有 Nginx 反向代理，需要调整 `proxy_read_timeout` 配置
+- 推理完成后可直接通过 `/api/v1/tasks/{task_id}/download/{filename}` 获取 CIF 文件
+- 可通过 `API_PUBLIC_URL` 环境变量指定外部访问地址，用于构造可点击的下载链接
+
+#### 4.1.4 DNA 序列推理（统一报告接口）
+
+**功能描述**：接收 DNA 序列，执行 AlphaFold3 结构预测，返回原始结果和格式化的 Markdown 推理报告。适用于前端直接调用渲染，无需额外解析。
+
+**接口**：`POST /api/v1/report`
+
+**输入参数**：与 `POST /api/v1/predict/dna` 完全相同。
+
+**输出**：`AlphaFold3ReportResponse` 对象，包含：
+- `type`：固定为 `"alphafold3_predict"`
+- `result`：原始 `TaskDetail` 对象
+- `markdown`：格式化的 Markdown 报告字符串
+
+**Markdown 报告包含的内容**：
+
+| 模块 | 内容 |
+|------|------|
+| 输入信息 | 任务名称、序列、序列长度、链型、推理耗时 |
+| 全局置信度 | Ranking Score、pTM、ipTM、pLDDT、PAE、无序比例、空间冲突 |
+| 逐链置信度 | 链 pTM、链 ipTM、链间 PAE 矩阵、链间 ipTM 矩阵 |
+| 最佳结果来源 | 说明最佳预测来自哪个 seed 和 sample |
+| 所有预测排名 | 表格：排名、种子、样本、Ranking Score、pTM、ipTM |
+| 结果文件下载 | 最佳 CIF、Confidences JSON、Summary JSON、排名 CSV 的下载链接 |
+| 总结 | 基于置信度指标的解读性总结 |
+
+**业务规则**：
+- 与 `predict/dna/sync` 执行相同的推理流程
+- 额外从 `summary_confidences.json` 和 `confidences.json` 提取详细置信度数据填入报告
+- 推理失败时报告显示错误信息而非抛出异常
+- 下载链接使用 `API_PUBLIC_URL` 环境变量构造（优先于请求 Host）
+
+### 4.2 历史记录模块
+
+#### 4.2.1 获取历史任务列表
+
+**功能描述**：获取历史任务列表，支持分页
+
+**接口**：`GET /api/v1/tasks`
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | Integer | 否 | 页码（默认 1） |
+| page_size | Integer | 否 | 每页数量（默认 20，最大 100） |
+
+**输出**：
+
+```json
+{
+  "items": [
+    {
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "status": "completed",
+      "job_name": "test_protein",
+      "created_at": "2026-06-25T02:50:00Z",
+      "completed_at": "2026-06-25T02:51:32Z",
+      "duration_seconds": 87,
+      "best_ranking_score": 0.85
+    }
+  ],
+  "total": 50,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+#### 4.2.2 查询历史任务详情
+
+**功能描述**：根据任务 ID 查询历史任务详情和结果
+
+**接口**：`GET /api/v1/tasks/{task_id}`
+
+**输出**：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "job_name": "test_protein",
+  "created_at": "2026-06-25T02:50:00Z",
+  "completed_at": "2026-06-25T02:51:32Z",
+  "duration_seconds": 87,
+  "input_summary": {
+    "name": "test_protein",
+    "sequences": [
+      {
+        "type": "protein",
+        "id": "A",
+        "length": 200
+      }
+    ],
+    "num_seeds": 1,
+    "num_samples": 5
+  },
+  "best_prediction": {
+    "seed": 42,
+    "sample": 0,
+    "ranking_score": 0.85,
+    "ptm": 0.75,
+    "iptm": 0.82
+  },
+  "files": {
+    "best_model_cif": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/model.cif",
+    "download_zip": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/download"
+  },
+  "error_message": null
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| task_id | String | 任务唯一标识 |
+| status | String | 任务状态（completed/failed） |
+| job_name | String | 任务名称（来自 JSON 的 name 字段） |
+| created_at | DateTime | 任务创建时间 |
+| completed_at | DateTime | 任务完成时间 |
+| duration_seconds | Integer | 推理耗时（秒） |
+| input_summary | Object | 输入摘要信息 |
+| best_prediction | Object | 最佳预测的置信度指标 |
+| files | Object | 结果文件下载链接 |
+| error_message | String | 错误信息（仅 failed 状态有值） |
+
+### 4.3 结果详情模块
+
+#### 4.3.1 获取推理结果详情
+
+**功能描述**：以 JSON 格式返回历史任务的完整推理结果，包含所有预测的排名和置信度指标
+
+**接口**：`GET /api/v1/tasks/{task_id}/results`
+
+**输出**：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "job_name": "test_protein",
+  "status": "completed",
+  "best_prediction": {
+    "seed": 42,
+    "sample": 0,
+    "ranking_score": 0.85,
+    "ptm": 0.75,
+    "iptm": 0.82,
+    "fraction_disordered": 0.05,
+    "has_clash": false,
+    "chain_ptm": [0.78],
+    "chain_iptm": [0.81],
+    "chain_pair_iptm": [[0.78]],
+    "chain_pair_pae_min": [[0.5]]
+  },
+  "all_predictions": [
+    {
+      "seed": 42,
+      "sample": 0,
+      "ranking_score": 0.85,
+      "ptm": 0.75,
+      "iptm": 0.82
+    },
+    {
+      "seed": 42,
+      "sample": 1,
+      "ranking_score": 0.82,
+      "ptm": 0.73,
+      "iptm": 0.80
+    }
+  ],
+  "files": {
+    "best_model_cif": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/model.cif",
+    "data_json": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/data.json",
+    "ranking_scores_csv": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/files/ranking_scores.csv",
+    "download_zip": "/api/v1/tasks/550e8400-e29b-41d4-a716-446655440000/download"
+  }
+}
+```
+
+#### 4.3.2 获取单个预测的详细置信度
+
+**功能描述**：获取指定 seed 和 sample 的详细置信度数据
+
+**接口**：`GET /api/v1/tasks/{task_id}/results/confidences`
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| seed | Integer | 是 | 随机种子 |
+| sample | Integer | 是 | 采样索引 |
+
+**输出**：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "seed": 42,
+  "sample": 0,
+  "summary": {
+    "ptm": 0.75,
+    "iptm": 0.82,
+    "fraction_disordered": 0.05,
+    "has_clash": false,
+    "ranking_score": 0.85,
+    "chain_ptm": [0.78],
+    "chain_iptm": [0.81],
+    "chain_pair_iptm": [[0.78]],
+    "chain_pair_pae_min": [[0.5]]
+  },
+  "details": {
+    "atom_plddts": [90.5, 85.2, 78.9],
+    "token_chain_ids": ["A", "A", "A"],
+    "atom_chain_ids": ["A", "A", "A"],
+    "contact_probs": [[1.0, 0.8, 0.5], [0.8, 1.0, 0.6], [0.5, 0.6, 1.0]]
+  },
+  "pae": [[0.1, 0.2, 0.3], [0.2, 0.1, 0.4], [0.3, 0.4, 0.1]]
+}
+```
+
+### 4.4 文件下载模块
+
+#### 4.4.1 下载结果文件
+
+**功能描述**：下载指定的结果文件。输出目录中的文件以**扁平结构**存储，通过 `{job_name}_` 前缀区分不同样本。
+
+**接口**：`GET /api/v1/tasks/{task_id}/download/{filename}`
+
+**支持的文件类型**：
+
+| 文件名（示例） | 说明 | Content-Type |
+|----------------|------|--------------|
+| `{job_name}_model.cif` | 最佳预测的结构文件 | chemical/x-mmcif |
+| `{job_name}_confidences.json` | 最佳预测的完整置信度数据 | application/json |
+| `{job_name}_summary_confidences.json` | 最佳预测的置信度摘要 | application/json |
+| `{job_name}_data.json` | 输入数据副本 | application/json |
+| `{job_name}_ranking_scores.csv` | 所有预测的排名分数 | text/csv |
+| `{job_name}_seed-{n}_sample-{n}_model.cif` | 指定样本的结构文件 | chemical/x-mmcif |
+| `{job_name}_seed-{n}_sample-{n}_confidences.json` | 指定样本的置信度 | application/json |
+| `{job_name}_seed-{n}_sample-{n}_summary_confidences.json` | 指定样本的置信度摘要 | application/json |
+
+**输出目录结构**：
+
+```
+storage/tasks/{task_id}/output/
+├── {job_name}_model.cif                          # 最佳预测
+├── {job_name}_confidences.json
+├── {job_name}_summary_confidences.json
+├── {job_name}_data.json
+├── {job_name}_ranking_scores.csv
+├── {job_name}_seed-42_sample-0_model.cif         # 样本 0
+├── {job_name}_seed-42_sample-0_confidences.json
+├── {job_name}_seed-42_sample-0_summary_confidences.json
+├── ...                                           # 样本 1-4
+└── {job_name}_seed-42_sample-4_model.cif
+```
+
+**响应示例**：
+
+```
+HTTP/1.1 200 OK
+Content-Type: chemical/x-mmcif
+Content-Disposition: attachment; filename="test_protein_model.cif"
+Content-Length: 123456
+
+[file content]
+```
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/zip
+Content-Disposition: attachment; filename="test_protein_results.zip"
+
+[zip content]
+```
+
+**ZIP 包结构**：
+
+```
+test_protein_results.zip
+├── test_protein_model.cif
+├── test_protein_confidences.json
+├── test_protein_summary_confidences.json
+├── test_protein_data.json
+├── test_protein_ranking_scores.csv
+├── TERMS_OF_USE.md
+└── seed-42_sample-0/
+    ├── test_protein_seed-42_sample-0_model.cif
+    ├── test_protein_seed-42_sample-0_confidences.json
+    └── test_protein_seed-42_sample-0_summary_confidences.json
+```
+
+### 4.5 系统管理模块
+
+#### 4.5.1 健康检查
+
+**功能描述**：检查系统各组件状态
+
+**接口**：`GET /api/v1/health`
+
+**输出**：
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-06-25T10:00:00Z",
+  "components": {
+    "api": {"status": "up"},
+    "database": {"status": "up"},
+    "storage": {"status": "up"},
+    "gpu": {"status": "up", "device": "NVIDIA A100"}
+  }
+}
+```
+
+#### 4.5.2 系统统计
+
+**功能描述**：获取系统运行统计信息
+
+**接口**：`GET /api/v1/stats`
+
+**输出**：
+
+```json
+{
+  "tasks": {
+    "total": 100,
+    "completed": 98,
+    "failed": 2
+  },
+  "storage": {
+    "used_bytes": 10737418240,
+    "total_bytes": 107374182400,
+    "usage_percent": 10.0
+  },
+  "performance": {
+    "avg_inference_time_seconds": 300,
+    "success_rate": 0.98
+  }
+}
+```
+
+---
+
+## 5. 非功能需求
+
+### 5.1 性能需求
+
+| 指标 | 要求 |
+|------|------|
+| API 响应时间（非推理） | < 500ms |
+| 任务状态查询响应时间 | < 100ms |
+| 文件上传大小限制 | 10MB |
+| 文件下载速度 | > 10MB/s |
+
+### 5.2 可靠性需求
+
+| 指标 | 要求 |
+|------|------|
+| 系统可用性 | > 99% |
+| 任务成功率 | > 95% |
+| 数据持久性 | 任务完成后数据保留 30 天 |
+
+### 5.3 数据保留策略
+
+- 历史计算结果保留 **30 天**
+- 超过 30 天的任务数据自动清理（包括数据库记录和文件）
+- 每天凌晨执行一次清理任务
+- 清理时同时删除数据库记录和存储文件
+
+### 5.4 并发处理策略
+
+由于模型只能使用单张 GPU 进行推理，采用 **同步阻塞模式**：
+
+- 同一时间只运行一个推理任务
+- 新请求需等待前一个任务完成后才能开始
+- 客户端阻塞等待推理完成，无超时限制
+- 多个并发请求按到达顺序排队处理
+
+### 5.5 日志与监控需求
+
+- 使用 loguru 进行结构化日志记录
+- 日志级别：DEBUG、INFO、WARNING、ERROR、CRITICAL
+- 记录关键操作：任务创建、开始、完成、失败
+- 支持日志轮转（按天轮转，保留 30 天）
+
+---
+
+## 6. 接口设计
+
+### 6.1 API 版本
+
+当前版本：`v1`
+
+基础路径：`/api/v1`
+
+**服务地址**：`http://<server-ip>:8015`
+
+### 6.2 接口汇总
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/v1/predict | 提交预测任务（同步阻塞，返回完整结果） |
+| POST | /api/v1/predict/dna | DNA 序列推理（EVO2 输出专用，自动生成双链） |
+| POST | /api/v1/predict/dna/sync | DNA 序列推理（同步阻塞版，前端直接调用） |
+| POST | /api/v1/report | DNA 结构预测（统一报告接口，返回 Markdown 报告） |
+| GET | /api/v1/tasks | 获取历史任务列表（分页） |
+| GET | /api/v1/tasks/{task_id} | 查询历史任务详情（含预测列表） |
+| GET | /api/v1/tasks/{task_id}/results | 获取历史任务完整结果 |
+| GET | /api/v1/tasks/{task_id}/download/{filename} | 下载结果文件 |
+| DELETE | /api/v1/tasks/{task_id} | 删除任务 |
+| GET | /api/v1/stats | 系统统计 |
+| GET | /health | 健康检查 |
+| GET | /api/v1/health | 健康检查 |
+| GET | /api/v1/stats | 系统统计 |
+
+### 6.3 错误码
+
+| HTTP 状态码 | 错误码 | 说明 |
+|-------------|--------|------|
+| 400 | INVALID_INPUT | 输入格式错误 |
+| 400 | INVALID_JSON | JSON 格式不符合 AlphaFold 3 规范 |
+| 400 | INVALID_DIALECT | dialect 字段不是 alphafold3 |
+| 404 | TASK_NOT_FOUND | 任务不存在 |
+| 404 | FILE_NOT_FOUND | 结果文件不存在 |
+| 413 | FILE_TOO_LARGE | 文件超过 10MB 限制 |
+| 500 | INTERNAL_ERROR | 服务器内部错误 |
+| 500 | INFERENCE_FAILED | 推理执行失败 |
+| 503 | GPU_UNAVAILABLE | GPU 资源不可用 |
+
+错误响应格式：
+
+```json
+{
+  "error": {
+    "code": "INVALID_JSON",
+    "message": "输入 JSON 格式不符合 AlphaFold 3 规范",
+    "details": "sequences 字段不能为空"
+  }
+}
+```
+
+---
+
+## 7. 数据模型
+
+### 7.1 数据库设计
+
+使用 SQLite 数据库，数据库文件位于容器内 `/app/data/alphafold3.db`，通过挂载持久化到宿主机。
+
+#### tasks 表
+
+```sql
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,                     -- UUID
+    name TEXT NOT NULL,                      -- 任务名称（来自 JSON）
+    status TEXT NOT NULL DEFAULT 'completed', -- completed/failed
+
+    -- 输入信息
+    input_data TEXT NOT NULL,               -- 原始输入 JSON
+    input_summary TEXT DEFAULT NULL,        -- 输入摘要 (JSON)
+    model_seeds TEXT DEFAULT NULL,          -- 随机种子列表 (JSON)
+
+    -- 结果信息
+    output_path TEXT DEFAULT NULL,          -- 输出目录路径
+    best_seed INTEGER DEFAULT NULL,         -- 最佳预测的 seed
+    best_sample INTEGER DEFAULT NULL,       -- 最佳预测的 sample
+    ranking_score REAL DEFAULT NULL,        -- 最佳排名分数
+    best_ptm REAL DEFAULT NULL,             -- 最佳预测的 pTM
+    best_iptm REAL DEFAULT NULL,            -- 最佳预测的 ipTM
+
+    -- 统计信息
+    num_seeds INTEGER DEFAULT NULL,         -- 种子数量
+    num_samples INTEGER DEFAULT NULL,       -- 每个种子的采样数
+
+    -- 时间信息
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at DATETIME DEFAULT NULL,
+
+    -- 错误信息
+    error_message TEXT DEFAULT NULL
+);
+
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_created_at ON tasks(created_at);
+```
+
+### 7.2 文件存储结构
+
+**容器内路径**：`/app/storage/tasks/{task_id}/`
+
+**宿主机路径**：`./storage/tasks/{task_id}/`（相对于项目目录，绑定挂载）
+
+```
+storage/
+└── tasks/
+    └── {task_id}/
+        ├── input.json                          # 用户输入的 JSON 文件
+        └── output/                             # 推理结果（扁平结构，展平所有文件到顶层）
+            ├── {job_name}_model.cif             # 最佳预测的结构文件
+            ├── {job_name}_confidences.json      # 最佳预测的置信度
+            ├── {job_name}_summary_confidences.json
+            ├── {job_name}_data.json             # 输入数据副本
+            ├── {job_name}_ranking_scores.csv    # 所有预测排名分数
+            ├── {job_name}_seed-{n}_sample-{n}_model.cif
+            ├── {job_name}_seed-{n}_sample-{n}_confidences.json
+            ├── {job_name}_seed-{n}_sample-{n}_summary_confidences.json
+            └── ...
+```
+
+### 7.3 结果解析逻辑
+
+API 需要解析 AlphaFold 3 的输出文件，提取以下信息用于接口返回：
+
+1. **从 `ranking_scores.csv` 解析**：
+   - 所有预测的 seed、sample、ranking_score
+
+2. **从 `summary_confidences.json` 解析**：
+   - ptm、iptm、fraction_disordered、has_clash
+   - chain_ptm、chain_iptm、chain_pair_iptm、chain_pair_pae_min
+
+3. **从 `confidences.json` 解析**：
+   - pae 矩阵
+   - atom_plddts 数组
+   - token_chain_ids、atom_chain_ids
+   - contact_probs 矩阵
+
+---
+
+## 8. 技术架构
+
+### 8.1 技术栈
+
+| 组件 | 技术选型 | 说明 |
+|------|----------|------|
+| Web 框架 | FastAPI | 高性能 Web 框架 |
+| 日志 | loguru | 结构化日志库 |
+| 数据库 | SQLite | 轻量级关系数据库 |
+| 文件存储 | 本地文件系统 | 宿主机挂载目录 |
+| 容器化 | Docker | 部署和运行环境 |
+| 序列化 | Pydantic | 数据验证和序列化 |
+
+### 8.2 架构图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Docker 容器 (端口 8015)                        │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    FastAPI Application                    │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │   │
+│  │  │  API Router  │  │  Middleware  │  │  Inference      │ │   │
+│  │  └─────────────┘  └─────────────┘  │  (同步阻塞调用)  │ │   │
+│  │                                     └─────────────────┘ │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│         │                    │                      │           │
+│         ▼                    ▼                      ▼           │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐ │
+│  │   SQLite     │    │   loguru     │    │  run_alphafold.py │ │
+│  │   Database   │    │   Logger     │    │  (模型推理)       │ │
+│  └──────────────┘    └──────────────┘    └──────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+        │                    │                      │
+        ▼                    ▼                      ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐
+│  宿主机      │    │  宿主机      │    │  宿主机              │
+│  data/       │    │  logs/       │    │  alphafold3/         │
+│  (数据库)    │    │  (日志)      │    │  (模型+数据库)       │
+└──────────────┘    └──────────────┘    └──────────────────────┘
+```
+
+### 8.3 核心流程
+
+#### 同步预测流程（POST /api/v1/predict）
+
+```
+1. 用户上传 JSON 文件
+2. 验证 JSON 格式（dialect、sequences 等）
+3. 生成 task_id，保存输入文件到 /app/storage/tasks/{task_id}/input.json
+4. 同步调用 run_alphafold.py：
+   python run_alphafold.py \
+     --json_path=/app/storage/tasks/{task_id}/input.json \
+     --model_dir=/root/models \
+     --output_dir=/app/storage/tasks/{task_id}/output
+5. 等待执行完成（客户端阻塞等待，无超时限制）
+6. 解析输出结果，提取置信度指标
+7. 保存到数据库（status=completed 或 failed）
+8. 返回完整结果 JSON 给客户端
+```
+
+#### DNA 同步预测流程（POST /api/v1/predict/dna/sync）
+
+```
+1. 前端传入 DNA 序列（来自 EVO2 输出）
+2. 验证 DNA 序列（仅允许 A/T/C/G）
+3. 生成反向互补链（A↔T, C↔G，然后反转）
+4. 构建 AlphaFold 3 输入 JSON（双链：A链 + B链）
+5. 生成 task_id，保存输入文件
+6. 同步调用 run_alphafold.py 执行推理
+7. 等待执行完成（客户端阻塞等待）
+8. 解析输出结果，提取置信度指标
+9. 保存到数据库并返回完整结果
+10. 前端通过 /api/v1/tasks/{task_id}/download/model.cif 获取 CIF 文件
+```
+
+#### 历史查询流程
+
+```
+1. 前端请求 GET /api/v1/tasks/{task_id}/results
+2. 从数据库读取任务信息
+3. 如果任务完成，读取输出目录中的文件
+4. 解析 ranking_scores.csv 和 summary_confidences.json
+5. 构建响应 JSON 返回给前端
+```
+
+### 8.4 模型预加载
+
+为提高推理响应速度，系统在启动时预加载 AlphaFold 模型到内存：
+
+```
+应用启动 (lifespan)
+    ↓
+配置 loguru 日志
+    ↓
+初始化数据库 (init_db)
+    ↓
+启动清理任务 (start_cleanup)
+    ↓
+预加载 AlphaFold 模型 (_get_runner)
+    ↓
+模型常驻内存，随时可响应推理请求
+```
+
+**优势**：
+- 首次推理无需等待模型加载（节省 2-5 分钟）
+- 响应时间更可预测
+- 日志记录模型加载状态
+
+### 8.5 日志系统
+
+使用 loguru 结构化日志库，支持：
+
+- **控制台输出**：带颜色的格式化日志
+- **文件输出**：自动轮转（7 天）、压缩（gz）、保留 30 天
+- **日志级别**：DEBUG/INFO/WARNING/ERROR
+- **关键日志点**：
+  - 应用启动/关闭
+  - 模型加载状态
+  - 请求接收/完成
+  - 推理开始/完成/失败
+  - 文件操作（创建/删除/下载）
+  - 健康检查结果
+
+---
+
+## 9. 部署方案
+
+### 9.1 目录结构
+
+**项目目录**：`/data1t/ntt/lvyizhuo/task06-alphafold3-agent/`
+
+```
+/data1t/ntt/lvyizhuo/task06-alphafold3-agent/
+├── api/                              # API 服务代码（扁平结构）
+│   ├── main.py                      # FastAPI 入口（uvicorn 启动）
+│   ├── config.py                    # 配置管理（环境变量）
+│   ├── router.py                    # 路由定义（11 个接口）
+│   ├── schemas.py                   # Pydantic 数据模型
+│   ├── service.py                   # 业务逻辑层（创建任务、推理、查询）
+│   ├── alphafold.py                 # AlphaFold 推理封装
+│   ├── models.py                    # SQLAlchemy ORM 模型
+│   ├── database.py                  # 数据库连接管理
+│   ├── cleanup.py                   # 定时清理任务
+│   ├── report_templates.py          # Markdown 报告模板生成
+│   └── requirements.txt             # Python 依赖
+├── docker/
+│   └── Dockerfile                   # 生产镜像构建文件（基于 alphafold3 镜像）
+├── docs/                            # 文档目录
+├── docker-compose.yml               # 生产部署配置（含 hot-reload 挂载）
+├── docker-compose.override.yml      # 开发环境覆盖配置
+├── data/                            # SQLite 数据库（绑定挂载）
+│   └── alphafold3.db
+├── storage/                         # 推理结果存储（绑定挂载）
+│   ├── inputs/
+│   ├── outputs/
+│   └── tasks/
+│       └── {task_id}/
+│           ├── input.json
+│           └── output/
+│               └── ... (扁平文件)
+├── logs/                            # 日志文件（绑定挂载）
+│   └── app.log
+└── run_alphafold.py                 # AlphaFold 3 推理入口脚本
+```
+
+**模型文件目录**：`/data1t/ntt/lvyizhuo/alphafold3/`
+
+```
+/data1t/ntt/lvyizhuo/alphafold3/
+├── alphafold3/                       # AlphaFold 代码
+├── databases/                        # 搜索数据库
+├── images/                           # Docker 镜像
+└── weights/                          # 模型权重
+```
+
+### 9.2 Docker 部署配置
+
+**基于现有 alphafold3 镜像**，在其中添加 FastAPI 服务。
+
+#### Dockerfile
+
+```dockerfile
+FROM alphafold3:latest
+
+# 安装 FastAPI 依赖
+COPY api/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -i https://repo.huaweicloud.com/repository/pypi/simple -r /tmp/requirements.txt
+
+# 复制 API 代码
+COPY api/ /app/alphafold/api/
+
+# 设置工作目录
+WORKDIR /app/alphafold
+
+# 暴露端口
+EXPOSE 8015
+
+# 启动命令（带 --reload 实现热加载）
+CMD ["python3", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8015", "--reload"]
+```
+
+#### docker-compose.yml
+
+```yaml
+version: "3.8"
+
+services:
+  alphafold3-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: alphafold3-api
+    restart: unless-stopped
+    ports:
+      - "8015:8015"
+    volumes:
+      # AlphaFold 3 model weights (read-only)
+      - /data1t/ntt/lvyizhuo/alphafold3/weights:/root/models:ro
+      # AlphaFold 3 search databases (read-only)
+      - /data1t/ntt/lvyizhuo/alphafold3/databases:/root/public_databases:ro
+      # Hot-reload: mount API code so changes take effect immediately
+      - ./api:/app/alphafold/api
+      # Task storage (inputs + outputs, read-write)
+      - ./storage:/app/storage
+      # SQLite database persistence
+      - ./data:/app/data
+      # Log persistence
+      - ./logs:/app/logs
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8015
+      - ALPHAFOLD_DIR=/app/alphafold
+      - MODEL_DIR=/root/models
+      - DB_DIR=/root/public_databases
+      - STORAGE_PATH=/app/storage
+      - DATABASE_PATH=/app/data/alphafold3.db
+      - LOG_FILE=/app/logs/app.log
+      - LOG_LEVEL=INFO
+      - DATA_RETENTION_DAYS=30
+      - MAX_UPLOAD_SIZE_MB=10
+      - API_PUBLIC_URL=http://36.137.166.174:8015
+      - NVIDIA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8015/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+```
+
+### 9.3 环境变量
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| API_HOST | 监听地址 | 0.0.0.0 |
+| API_PORT | 监听端口 | 8015 |
+| ALPHAFOLD_DIR | AlphaFold 代码目录 | /app/alphafold |
+| MODEL_DIR | 模型参数目录 | /root/models |
+| DB_DIR | 数据库目录 | /root/public_databases |
+| STORAGE_PATH | 推理结果存储路径 | /app/storage |
+| DATABASE_PATH | SQLite 数据库路径 | /app/data/alphafold3.db |
+| LOG_FILE | 日志文件路径 | /app/logs/app.log |
+| LOG_LEVEL | 日志级别 | INFO |
+| DATA_RETENTION_DAYS | 数据保留天数 | 30 |
+| MAX_UPLOAD_SIZE_MB | 上传文件大小限制 | 10 |
+| API_PUBLIC_URL | 外部访问地址（用于构造下载链接） | （从请求 Host 推断） |
+| NVIDIA_VISIBLE_DEVICES | 可见 GPU 编号 | 1 |
+| CUDA_VISIBLE_DEVICES | CUDA 设备编号 | 1 |
+
+### 9.4 启动命令
+
+```bash
+# 构建镜像
+docker-compose build
+
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+```
+
+### 9.5 端口说明
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| API 服务 | 8015 | FastAPI 接口服务 |
+| SQLite | - | 无需端口，文件数据库 |
+
+---
+
+## 10. 测试方案
+
+### 10.1 测试用例
+
+#### 测试输入 JSON
+
+```json
+{
+    "name": "test_protein",
+    "modelSeeds": [42],
+    "sequences": [
+        {
+            "protein": {
+                "id": "A",
+                "sequence": "GMRESYANENQFGFKTINSDIHKIVIVGGYGKLGGLFARYLRASGYPISILDREDWAVAESILANADVVIVSVPINLTLETIERLKPYLTENMLLADLTSVKREPLAKMLEVHTGAVLGLHPMFGADIASMAKQVVVRCDGRFPERYEWLLEQIQIWGAKIYQTNATEHDHNMTYIQALRHFSTFANGLHLSKQPINLANLLALSSPIYRLELAMIGRLFAQDAELYADIIMDKSENLAVIETLKQTYDEALTFFENNDRQGFIDAFHKVRDWFGDYSEQFLKESRQLLQQANDLKQG"
+            }
+        }
+    ],
+    "dialect": "alphafold3",
+    "version": 1
+}
+```
+
+### 10.2 测试场景
+
+| 场景 | 测试内容 | 预期结果 |
+|------|----------|----------|
+| 正常提交 | 上传有效 JSON | 同步返回完整结果（task_id、置信度、文件链接） |
+| 无效 JSON | 上传格式错误的 JSON | 返回 400 错误 |
+| DNA 同步推理 | POST /api/v1/predict/dna/sync | 返回 TaskDetail 含 5 个 predictions |
+| 统一报告 | POST /api/v1/report | 返回 result + markdown 报告 |
+| 查询历史 | 查询存在的 task_id | 返回任务详情和结果 |
+| 查询不存在 | 查询不存在的 task_id | 返回 404 错误 |
+| 获取历史列表 | GET /api/v1/tasks | 返回分页任务列表 |
+| 下载文件 | 下载 CIF 文件 | 返回文件内容 |
+| 删除任务 | DELETE 存在的 task_id | 返回成功消息 |
+
+### 10.3 测试命令
+
+```bash
+# 提交任务（同步等待结果）
+curl -X POST http://localhost:8015/api/v1/predict \
+  -F "file=@test_input.json"
+
+# DNA 同步推理
+curl -X POST http://localhost:8015/api/v1/predict/dna/sync \
+  -H "Content-Type: application/json" \
+  -d '{"sequence": "ATCGTAGC", "name": "test_dna"}'
+
+# DNA 统一报告接口
+curl -X POST http://localhost:8015/api/v1/report \
+  -H "Content-Type: application/json" \
+  -d '{"sequence": "ATCGTAGC", "name": "test_report"}'
+
+# 查询历史任务详情
+curl http://localhost:8015/api/v1/tasks/{task_id}
+
+# 获取历史任务列表
+curl http://localhost:8015/api/v1/tasks
+
+# 获取历史任务结果
+curl http://localhost:8015/api/v1/tasks/{task_id}/results
+
+# 下载结构文件
+curl -O http://localhost:8015/api/v1/tasks/{task_id}/download/{job_name}_model.cif
+
+# 下载排名分数 CSV
+curl -O http://localhost:8015/api/v1/tasks/{task_id}/download/{job_name}_ranking_scores.csv
+
+# 删除任务
+curl -X DELETE http://localhost:8015/api/v1/tasks/{task_id}
+
+# 系统统计
+curl http://localhost:8015/api/v1/stats
+
+# 健康检查
+curl http://localhost:8015/health
+```
+
+---
+
+## 11. 项目计划
+
+### 11.1 里程碑
+
+| 阶段 | 时间 | 交付物 |
+|------|------|--------|
+| M1: 基础框架 | 第 1 周 | FastAPI + SQLite + loguru 配置 |
+| M2: 核心功能 | 第 2 周 | AlphaFold 调用封装 + 任务队列 |
+| M3: 接口实现 | 第 3 周 | 完整 REST API + 结果解析 |
+| M4: 测试部署 | 第 4 周 | 测试用例 + 部署文档 |
+
+### 11.2 详细任务分解（全部已完成）
+
+#### 第 1 周：基础框架
+- [x] 初始化项目结构（api/ 目录）
+- [x] 配置 FastAPI 应用
+- [x] 集成 loguru 日志
+- [x] 设计并创建 SQLite 数据库
+- [x] 实现基础中间件（CORS、异常处理）
+- [x] 编写 Dockerfile
+
+#### 第 2 周：核心功能
+- [x] 实现 AlphaFold 调用封装（run_alphafold.py）
+- [x] 实现文件存储管理器
+- [x] 实现结果解析逻辑
+- [x] 实现数据清理任务
+
+#### 第 3 周：接口实现
+- [x] 实现同步预测接口（POST /api/v1/predict）
+- [x] 实现 DNA 序列推理接口（POST /api/v1/predict/dna）
+- [x] 实现 DNA 同步推理接口（POST /api/v1/predict/dna/sync）
+- [x] 实现统一报告接口（POST /api/v1/report）
+- [x] 实现历史任务查询接口（GET /api/v1/tasks）
+- [x] 实现结果获取接口（GET /api/v1/tasks/{id}/results）
+- [x] 实现文件下载接口
+- [x] 实现健康检查和统计接口
+
+#### 第 4 周：测试部署
+- [x] 编写单元测试
+- [x] 编写集成测试
+- [x] 编写 docker-compose.yml
+- [x] 编写部署文档
+- [x] 部署生产环境（华为云 ECS V100S）
+
+---
+
+## 12. 风险与应对
+
+| 风险 | 影响 | 概率 | 应对措施 |
+|------|------|------|----------|
+| 推理时间过长 | 客户端长时间等待 | 高 | 前端显示等待提示，无超时限制 |
+| 存储空间不足 | 无法保存结果 | 中 | 自动清理 30 天前数据 |
+| 模型推理失败 | 任务失败 | 中 | 记录错误信息，返回失败状态 |
+| Docker 容器异常 | 服务中断 | 低 | 异常捕获，返回错误信息 |
+| GPU 内存不足 | 推理失败 | 中 | 限制序列长度，优化配置 |
+| 并发请求阻塞 | 响应延迟 | 高 | 单卡阻塞模式，按顺序处理 |
+
+---
+
+## 13. 附录
+
+### 13.1 参考文档
+
+- [AlphaFold 3 官方文档](https://github.com/google-deepmind/alphafold3)
+- [AlphaFold 3 输入格式](input.md)
+- [AlphaFold 3 输出格式](output.md)
+- [FastAPI 官方文档](https://fastapi.tiangolo.com/)
+- [loguru 官方文档](https://loguru.readthedocs.io/)
+
+### 13.2 术语表
+
+| 术语 | 说明 |
+|------|------|
+| AlphaFold 3 | Google DeepMind 开发的生物分子结构预测模型 |
+| pLDDT | 预测局部距离差异测试，原子级置信度指标（0-100） |
+| PAE | 预测对齐误差，残基对之间的相对位置误差 |
+| pTM | 预测模板建模分数，整体结构质量指标（0-1） |
+| ipTM | 界面预测模板建模分数，复合物界面质量指标（0-1） |
+| ranking_score | 综合排名分数，用于选择最佳预测 |
+| mmCIF | macromolecular Crystallographic Information File，结构文件格式 |
+| MSA | 多序列比对，用于蛋白质结构预测的进化信息 |
+
+### 13.3 变更记录
+
+| 版本 | 日期 | 作者 | 变更说明 |
+|------|------|------|----------|
+| v1.0 | 2026-06-25 | lvyizhuo | 初始版本 |
+| v2.0 | 2026-06-25 | lvyizhuo | 简化设计：单文件上传、FIFO 队列、30 天数据清理、无认证 |
+| v3.0 | 2026-06-25 | lvyizhuo | 明确部署方案：端口 8015、SQLite 外部、Docker 容器部署、目录结构 |
+| v4.0 | 2026-06-25 | lvyizhuo | 同步接口设计：移除异步队列，POST /api/v1/predict 同步阻塞返回完整结果，保留历史记录查询 |
+| v5.0 | 2026-06-25 | lvyizhuo | 新增 POST /api/v1/predict/dna 接口（EVO2 输出专用，自动生成反向互补链实现双链 DNA 结构预测）；存储改为绑定挂载 |
+| v6.0 | 2026-06-25 | lvyizhuo | 新增 POST /api/v1/predict/dna/sync 同步阻塞接口；添加模型预加载功能；增强 loguru 日志输出 |
+| v7.0 | 2026-07-14 | lvyizhuo | 新增 POST /api/v1/report 统一报告接口（返回 Markdown 报告）；新增 report_templates.py 报告模板；新增 ranking_scores.csv 文件下载；增加链对 ipTM 置信度指标展示；增加最佳结果来源说明；增加 API_PUBLIC_URL 环境变量；启用热加载（--reload + 代码挂载）；模型路径移至 /data1t/ntt；GPU 切换至设备 1；简化 AlphaFold3ReportRequest 通过继承消除重复 |
+
+---
+
+**文档结束**

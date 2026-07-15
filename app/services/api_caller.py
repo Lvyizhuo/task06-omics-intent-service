@@ -33,6 +33,9 @@ TASK_API_MAP = {
     210: {"endpoint": "/report", "type": "predict", "task_param": "translation_absolute", "service": "plantcad2"},
 }
 
+# AlphaFold3 统一报告接口路径
+ALPHAFOLD3_REPORT_ENDPOINT = "/api/v1/report"
+
 
 def get_service_base_url(service: str) -> str:
     """获取服务基础URL"""
@@ -101,6 +104,131 @@ def build_request_body(task_id: int, params: Dict[str, Any],
     return request_body
 
 
+async def _call_api_with_retry(url: str, request_body: Dict[str, Any],
+                                timeout: float = settings.api_timeout) -> Dict[str, Any]:
+    """
+    带重试的 HTTP POST 调用（内部工具函数）
+
+    Args:
+        url: 请求 URL
+        request_body: 请求体
+        timeout: 超时时间（秒）
+
+    Returns:
+        接口响应结果
+
+    Raises:
+        httpx.HTTPStatusError: 接口返回错误状态码（4xx 不重试）
+        httpx.TimeoutException: 请求超时（重试耗尽）
+        Exception: 其他异常（重试耗尽）
+    """
+    last_error = None
+    for attempt in range(settings.max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=request_body)
+                response.raise_for_status()
+
+                result = response.json()
+                logger.info(f"接口调用成功 | url={url} attempt={attempt + 1}")
+                return result
+
+        except httpx.TimeoutException as e:
+            last_error = e
+            logger.warning(f"接口调用超时 | url={url} timeout={timeout}s attempt={attempt + 1}/{settings.max_retries}")
+        except httpx.HTTPStatusError as e:
+            last_error = e
+            logger.warning(f"接口调用错误 | url={url} status={e.response.status_code} attempt={attempt + 1}/{settings.max_retries}")
+            # 4xx错误不重试
+            if 400 <= e.response.status_code < 500:
+                raise
+        except Exception as e:
+            last_error = e
+            logger.warning(f"接口调用异常 | url={url} error={str(e)} attempt={attempt + 1}/{settings.max_retries}")
+
+    # 所有重试都失败
+    logger.error(f"接口调用最终失败 | url={url}")
+    raise last_error
+
+
+async def _call_evo2_pipeline(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    EVO2 管道调用：序列生成 → AlphaFold3 结构预测
+
+    1. 调用 EVO2 的 /api/v1/generate 接口生成序列
+    2. 将生成的序列传入 AlphaFold3 的 /api/v1/report 接口进行结构预测
+
+    Args:
+        params: LLM 提取的参数（prompt, numTokens, temperature 等）
+
+    Returns:
+        合并后的结果字典，包含：
+        - evo2_result: EVO2 原始响应
+        - generated_sequence: EVO2 生成的序列（顶层兼容字段）
+        - alphafold3_result: AlphaFold3 响应（含 markdown 报告），失败时为 None
+        - alphafold3_error: AlphaFold3 错误信息（如有）
+        - markdown: AlphaFold3 的 Markdown 报告（顶层兼容字段）
+    """
+    logger.info("开始 EVO2 管道调用：序列生成 → AlphaFold3 结构预测")
+
+    # ── Step 1: 构造 EVO2 请求体 ──
+    evo2_request = {
+        "prompt": params.get("prompt") or params.get("sequence", ""),
+        "numTokens": str(params.get("numTokens", "200")),
+        "temperature": str(params.get("temperature", "0.6")),
+        "topK": str(params.get("topK", "4")),
+        "topP": str(params.get("topP", "0.6")),
+        "showLogits": str(params.get("showLogits", "0")),
+    }
+    evo2_url = f"{settings.evo2_base_url}/api/v1/generate"
+
+    logger.info(f"Step 1: 调用 EVO2 | url={evo2_url}")
+    logger.debug(f"EVO2 请求参数: {evo2_request}")
+
+    # 调用 EVO2
+    evo2_result = await _call_api_with_retry(evo2_url, evo2_request, timeout=settings.api_timeout)
+
+    # 提取生成的序列
+    # EVO2 返回格式：{"result": {"sequences": "ATCG..."}, "res_code": "0", "res_desc": "success"}
+    evo2_inner = evo2_result.get("result", {})
+    generated_sequence = evo2_inner.get("sequences", "") or evo2_result.get("generated_sequence", "")
+
+    # 初始化合并结果（markdown 由路由层单独提取，不在 result 中重复存放）
+    combined = {
+        "evo2_result": evo2_result,
+        "generated_sequence": generated_sequence,
+        "alphafold3_result": None,
+        "alphafold3_error": None,
+    }
+
+    # ── Step 2: 如果没有生成序列，跳过 AlphaFold3 ──
+    if not generated_sequence:
+        logger.warning("EVO2 未生成有效序列，跳过 AlphaFold3 结构预测")
+        return combined
+
+    logger.info(f"EVO2 生成序列成功 | 长度={len(generated_sequence)}bp")
+    logger.info(f"Step 2: 调用 AlphaFold3 结构预测 | url={settings.alphafold3_base_url}{ALPHAFOLD3_REPORT_ENDPOINT}")
+
+    # 构造 AlphaFold3 请求体（使用生成的序列进行结构预测）
+    af3_request = {
+        "sequence": generated_sequence,
+        "name": f"evo2_generated_{params.get('prompt', '')[:30]}",
+        "modelSeeds": [42],
+    }
+
+    af3_url = f"{settings.alphafold3_base_url}{ALPHAFOLD3_REPORT_ENDPOINT}"
+
+    try:
+        af3_result = await _call_api_with_retry(af3_url, af3_request, timeout=settings.alphafold3_timeout)
+        combined["alphafold3_result"] = af3_result
+        logger.info(f"AlphaFold3 结构预测成功 | status={af3_result.get('result', {}).get('status', 'unknown')}")
+    except Exception as e:
+        combined["alphafold3_error"] = str(e)
+        logger.warning(f"AlphaFold3 结构预测失败（EVO2 已成功）: {str(e)}")
+
+    return combined
+
+
 async def call_downstream_api(task_id: int, params: Dict[str, Any]) -> Dict[str, Any]:
     """
     调用下游接口
@@ -120,6 +248,10 @@ async def call_downstream_api(task_id: int, params: Dict[str, Any]) -> Dict[str,
     if task_id not in TASK_API_MAP:
         raise ValueError(f"无效的任务ID: {task_id}")
 
+    # ── EVO2 管道：序列生成 → AlphaFold3 结构预测 ──
+    if task_id == 101:
+        return await _call_evo2_pipeline(params)
+
     api_config = TASK_API_MAP[task_id]
     endpoint = api_config["endpoint"]
     task_param = api_config.get("task_param")
@@ -137,35 +269,7 @@ async def call_downstream_api(task_id: int, params: Dict[str, Any]) -> Dict[str,
     logger.debug(f"请求URL: {url}")
     logger.debug(f"请求参数: {request_body}")
 
-    # 带重试的请求
-    last_error = None
-    for attempt in range(settings.max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=settings.api_timeout) as client:
-                response = await client.post(url, json=request_body)
-                response.raise_for_status()
-
-                result = response.json()
-                logger.info(f"接口调用成功 | task_id={task_id} attempt={attempt + 1}")
-                logger.debug(f"响应结果: {result}")
-                return result
-
-        except httpx.TimeoutException as e:
-            last_error = e
-            logger.warning(f"接口调用超时 | task_id={task_id} attempt={attempt + 1}/{settings.max_retries}")
-        except httpx.HTTPStatusError as e:
-            last_error = e
-            logger.warning(f"接口调用错误 | task_id={task_id} status={e.response.status_code} attempt={attempt + 1}/{settings.max_retries}")
-            # 4xx错误不重试
-            if 400 <= e.response.status_code < 500:
-                raise
-        except Exception as e:
-            last_error = e
-            logger.warning(f"接口调用异常 | task_id={task_id} error={str(e)} attempt={attempt + 1}/{settings.max_retries}")
-
-    # 所有重试都失败
-    logger.error(f"接口调用最终失败 | task_id={task_id}")
-    raise last_error
+    return await _call_api_with_retry(url, request_body, timeout=settings.api_timeout)
 
 
 def format_result_for_user(task_id: int, result: Dict[str, Any]) -> str:
@@ -188,12 +292,34 @@ def format_result_for_user(task_id: int, result: Dict[str, Any]) -> str:
     # EVO2 直接返回 flat dict，用 .get("result", result) 透明兼容
     inner = result.get("result", result) if task_id != 101 else result
 
-    # EVO2 基因序列预测生成
+    # EVO2 基因序列预测生成 → AlphaFold3 结构预测
     if task_id == 101:
-        generated = result.get("generated_sequence", "")
+        evo2 = result.get("evo2_result", result)
+        # EVO2 返回格式：{"result": {"sequences": "ATCG..."}, ...}
+        evo2_inner = evo2.get("result", {})
+        generated = evo2_inner.get("sequences", "") or evo2.get("generated_sequence", "")
+
+        msg_parts = []
         if generated:
             preview = generated[:50] + "..." if len(generated) > 50 else generated
-            return f"已生成后续序列（长度：{len(generated)}bp）：{preview}"
+            msg_parts.append(f"已生成后续序列（长度：{len(generated)}bp）：{preview}")
+
+        af3 = result.get("alphafold3_result")
+        if af3:
+            af3_inner = af3.get("result", {})
+            af3_status = af3_inner.get("status", "unknown")
+            if af3_status == "completed":
+                best_ptm = af3_inner.get("best_ptm", "N/A")
+                best_iptm = af3_inner.get("best_iptm", "N/A")
+                msg_parts.append(f"结构预测完成（pTM={best_ptm}, ipTM={best_iptm}）")
+            else:
+                error_msg = af3_inner.get("error_message", af3_status)
+                msg_parts.append(f"结构预测失败：{error_msg}")
+        elif result.get("alphafold3_error"):
+            msg_parts.append(f"结构预测失败：{result['alphafold3_error']}")
+
+        if msg_parts:
+            return "；".join(msg_parts)
         return "基因序列预测生成完成"
 
     # 嵌入提取
